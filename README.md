@@ -5,6 +5,8 @@ Nothing-OS-inspired look. One Go binary, zero dependencies, talks straight to th
 official [Datalix API](https://apidoc.datalix.de/).
 
 > [!NOTE]
+> work in progress
+> 
 > Vibecoded under human supervision by **Claude Fable 5** running ultracode (ultra steroids).
 
 > **Not affiliated with Datalix. Use at your own risk.**
