@@ -172,7 +172,6 @@ function bindDialog(btnSel, dlgId, fill) {
   });
 }
 
-bindDialog('#pbi-create-open', 'pbi-create-modal');
 bindDialog('.pbi-edit', 'pbi-edit-modal', function (b, dlg) {
   dlg.querySelector('[name=id]').value = b.getAttribute('data-id');
   dlg.querySelector('[name=name]').value = b.getAttribute('data-name');
@@ -234,8 +233,6 @@ function makeChart(canvas, series, fmt) {
   };
 }
 
-
-bindDialog('#novnc-open', 'novnc-modal');
 
 /* Access page: the create dialog shows the permission set matching the
    selected service; disabled fieldsets keep their boxes out of the POST. */

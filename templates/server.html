@@ -48,7 +48,7 @@
           <button class="btn btn-danger" type="submit">force stop</button>
         </form>
         {{if .Info.Display.NoVNC}}
-        <button class="btn" type="button" id="novnc-open">noVNC console</button>
+        <button class="btn" type="button" data-dlg="novnc-modal">noVNC console</button>
         {{end}}
         <a class="btn" href="/server/{{.ID}}?tab=billing">extend / renew</a>
         {{if .Info.Display.Backup}}

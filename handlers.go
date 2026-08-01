@@ -473,14 +473,9 @@ func ordersPage(w http.ResponseWriter, r *http.Request, s *session) {
 		step = 10
 	}
 	ov.From = op.PageInfo.Last
-	ov.To = ov.From + step
-	if ov.To > ov.Total {
-		ov.To = ov.Total
-	}
+	ov.To = min(ov.From+step, ov.Total)
 	ov.HasPrev = start > 0
-	if ov.PrevStart = ov.From - step; ov.PrevStart < 0 {
-		ov.PrevStart = 0
-	}
+	ov.PrevStart = max(ov.From-step, 0)
 	ov.NextStart = ov.From + step
 	ov.HasNext = ov.To < ov.Total
 	v.Data = ov

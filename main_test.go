@@ -227,20 +227,17 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'none'") {
 		t.Fatalf("missing CSP, got %q", csp)
 	}
-	body := readBody(t, resp)
-	csrf := regexp.MustCompile(`name="csrf" value="([a-f0-9]{64})"`).FindStringSubmatch(body)
-	if csrf == nil {
-		t.Fatal("no csrf field on login page")
-	}
+	readBody(t, resp)
+	csrf := findSessionCSRF(t, client, panel.URL)
 
 	// login with auto-detected user id
 	resp, err = client.PostForm(panel.URL+"/login", url.Values{
-		"csrf": {csrf[1]}, "apikey": {testKey},
+		"csrf": {csrf}, "apikey": {testKey},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	body = readBody(t, resp)
+	body := readBody(t, resp)
 	if resp.Request.URL.Path != "/" {
 		t.Fatalf("login did not land on overview: %s (body: %.200s)", resp.Request.URL, body)
 	}
@@ -361,9 +358,10 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 	}
 
 	// create + delete round-trip through the API
-	sessCSRF2 := findSessionCSRF(t, client, panel.URL)
+	// one token is enough: the session CSRF never rotates
+	sessCSRF := findSessionCSRF(t, client, panel.URL)
 	resp, err = client.PostForm(panel.URL+"/donations/create", url.Values{
-		"csrf": {sessCSRF2}, "name": {"streamlink"},
+		"csrf": {sessCSRF}, "name": {"streamlink"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -372,7 +370,7 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 		t.Fatal("donation link create did not flash success")
 	}
 	resp, err = client.PostForm(panel.URL+"/donations/delete", url.Values{
-		"csrf": {sessCSRF2}, "id": {"3f9a1c2e-7b4d-4a1e-9c3f-2b6d8e1f0a55"},
+		"csrf": {sessCSRF}, "id": {"3f9a1c2e-7b4d-4a1e-9c3f-2b6d8e1f0a55"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -398,9 +396,8 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 	}
 
 	// affiliate create + delete round-trip
-	affCSRF := findSessionCSRF(t, client, panel.URL)
 	resp, err = client.PostForm(panel.URL+"/affiliate/create", url.Values{
-		"csrf": {affCSRF}, "name": {"partner"},
+		"csrf": {sessCSRF}, "name": {"partner"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -409,7 +406,7 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 		t.Fatal("affiliate link create did not flash success")
 	}
 	resp, err = client.PostForm(panel.URL+"/affiliate/delete", url.Values{
-		"csrf": {affCSRF}, "id": {"7c1d2e3f-0a5b-4c6d-8e9f-1a2b3c4d5e6f"},
+		"csrf": {sessCSRF}, "id": {"7c1d2e3f-0a5b-4c6d-8e9f-1a2b3c4d5e6f"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -438,12 +435,11 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 	}
 
 	// top-up round-trip: credit/add → order pay → redirect to provider
-	payCSRF := findSessionCSRF(t, client, panel.URL)
 	noRedir := &http.Client{Jar: jar, CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
 	resp, err = noRedir.PostForm(panel.URL+"/credit/topup", url.Values{
-		"csrf": {payCSRF}, "method": {"paypal"}, "amount": {"25"},
+		"csrf": {sessCSRF}, "method": {"paypal"}, "amount": {"25"},
 		"tos": {"1"}, "privacy": {"1"}, "norefund": {"1"},
 	})
 	if err != nil {
@@ -459,7 +455,7 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 
 	// topup without the consents → bounced back with an error, no API call
 	resp, err = noRedir.PostForm(panel.URL+"/credit/topup", url.Values{
-		"csrf": {payCSRF}, "method": {"paypal"}, "amount": {"25"},
+		"csrf": {sessCSRF}, "method": {"paypal"}, "amount": {"25"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -489,14 +485,13 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 	}
 
 	// create + rename + reassign + pay-with-credit flash flows
-	pbiCSRF := findSessionCSRF(t, client, panel.URL)
 	for _, tc := range []struct{ path, msg string; form url.Values }{
 		{"/paybyinvoice/create", "Own invoice created.", url.Values{"name": {"custom"}}},
 		{"/paybyinvoice/rename", "Own invoice renamed.", url.Values{"id": {"9e8d7c6b-5a49-4321-8765-fedcba098765"}, "name": {"renamed"}}},
 		{"/paybyinvoice/reassign", "Transaction reassigned.", url.Values{"invoice": {"default"}, "transaction": {"31337"}}},
 		{"/paybyinvoice/pay", "Invoice paid with credit.", url.Values{"id": {"default"}, "paymentmethod": {"credit"}}},
 	} {
-		tc.form.Set("csrf", pbiCSRF)
+		tc.form.Set("csrf", sessCSRF)
 		resp, err = client.PostForm(panel.URL+tc.path, tc.form)
 		if err != nil {
 			t.Fatal(err)
@@ -508,7 +503,7 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 
 	// paying with a provider forwards to the checkout URL
 	resp, err = noRedir.PostForm(panel.URL+"/paybyinvoice/pay", url.Values{
-		"csrf": {pbiCSRF}, "id": {"default"}, "paymentmethod": {"paypal"},
+		"csrf": {sessCSRF}, "id": {"default"}, "paymentmethod": {"paypal"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -529,9 +524,8 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 	}
 
 	// creating a scheduled task round-trips through the API
-	srvCSRF := findSessionCSRF(t, client, panel.URL)
 	resp, err = client.PostForm(panel.URL+"/server/"+testKVM+"/cron", url.Values{
-		"csrf": {srvCSRF}, "name": {"weekly"}, "expression": {"0 5 * * *"}, "action": {"backup"},
+		"csrf": {sessCSRF}, "name": {"weekly"}, "expression": {"0 5 * * *"}, "action": {"backup"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -552,7 +546,7 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 
 	// protection status change hits the (undocumented) prot/status endpoint
 	resp, err = client.PostForm(panel.URL+"/server/"+testKVM+"/protstatus", url.Values{
-		"csrf": {srvCSRF}, "ip": {"1.2.3.4"}, "status": {"permanent"},
+		"csrf": {sessCSRF}, "ip": {"1.2.3.4"}, "status": {"permanent"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -584,9 +578,8 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 	}
 
 	// placing the order forwards to the payment provider
-	ordCSRF := findSessionCSRF(t, client, panel.URL)
 	resp, err = noRedir.PostForm(panel.URL+"/order/bbbbbbbb-0000-0000-0000-000000000001", url.Values{
-		"csrf": {ordCSRF}, "os": {"cccccccc-0000-0000-0000-000000000001"}, "ipcount": {"1"},
+		"csrf": {sessCSRF}, "os": {"cccccccc-0000-0000-0000-000000000001"}, "ipcount": {"1"},
 		"paymentmethod": {"paypal"}, "credit": {"1"}, "tos": {"1"}, "privacy": {"1"},
 	})
 	if err != nil {
@@ -612,9 +605,8 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 	if !strings.Contains(body, "Start server") || !strings.Contains(body, `value="start" checked`) {
 		t.Fatal("permission tree / granted perms not rendered")
 	}
-	accCSRF := findSessionCSRF(t, client, panel.URL)
 	resp, err = client.PostForm(panel.URL+"/access/create", url.Values{
-		"csrf": {accCSRF}, "service": {"aaaaaaaa-0000-0000-0000-000000000001"},
+		"csrf": {sessCSRF}, "service": {"aaaaaaaa-0000-0000-0000-000000000001"},
 		"key": {"AKEY123"}, "name": {"mate"}, "perm": {"start", "showLoginData"},
 	})
 	if err != nil {
@@ -624,7 +616,7 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 		t.Fatal("access create did not flash success")
 	}
 	resp, err = client.PostForm(panel.URL+"/access/accept", url.Values{
-		"csrf": {accCSRF}, "id": {"eeeeeeee-0000-0000-0000-000000000002"},
+		"csrf": {sessCSRF}, "id": {"eeeeeeee-0000-0000-0000-000000000002"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -653,7 +645,6 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 	readBody(t, resp)
 
 	// cross-origin POST → rejected even with valid CSRF
-	sessCSRF := findSessionCSRF(t, client, panel.URL)
 	req, _ := http.NewRequest("POST", panel.URL+"/logout",
 		strings.NewReader("csrf="+sessCSRF))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

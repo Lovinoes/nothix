@@ -40,7 +40,7 @@
   </form>
 
   <h3 class="sec-label" style="margin-top:18px">Invoice data</h3>
-  <form method="post" action="/credit/invoicedata" id="pay-invoice-form">
+  <form method="post" action="/credit/invoicedata">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
     <input type="hidden" name="method" class="pay-method-input">
     <div class="field"><label for="pay-company">Company (optional — a company name registers your account as B2B)</label>
