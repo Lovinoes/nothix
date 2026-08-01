@@ -1,8 +1,10 @@
 package main
 
 import (
-	"crypto/subtle"
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"log"
@@ -11,6 +13,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -76,20 +79,12 @@ func loginSubmit(w http.ResponseWriter, r *http.Request) {
 		renderLogin(w, r, "Too many attempts — wait a few minutes.", http.StatusTooManyRequests)
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-	if !originOK(r) {
-		http.Error(w, "forbidden", http.StatusForbidden)
-		return
-	}
 	c, err := r.Cookie("dplogin")
-	got := r.PostFormValue("csrf")
-	if err != nil || len(c.Value) != 64 || got == "" ||
-		subtle.ConstantTimeCompare([]byte(got), []byte(c.Value)) != 1 {
+	if err != nil || len(c.Value) != 64 {
 		renderLogin(w, r, "Form expired — please try again.", http.StatusForbidden)
+		return
+	}
+	if !postGuard(w, r, c.Value) {
 		return
 	}
 
@@ -287,19 +282,30 @@ func servicesHide(w http.ResponseWriter, r *http.Request, s *session) {
 }
 
 type serverView struct {
-	ID       string
-	Tab      string
-	Info     ServiceInfo
-	Hardware *Hardware
-	IPs      *ServiceIPs
-	Traffic  *TrafficHistory
-	Backups  []Backup
-	OSList   []OSEntry
-	Logs     []ActionLog
+	ID         string
+	Tab        string
+	Info       ServiceInfo
+	Hardware   *Hardware
+	IPs        *ServiceIPs
+	Traffic    *TrafficHistory
+	Backups    []Backup
+	OSList     []OSEntry
+	Logs       []ActionLog
+	Cron       []CronJob
+	Incidents  *IncidentsPage
+	Search     string
+	CustomISOs []CustomISO
+	ISOList    []OSEntry
+	UplinkMB   int // product uplink converted to MB/s for the edit form
+	MaxUplinkMB int
+	// ddos log pagination
+	IncFrom, IncTo, IncPrev, IncNext int
+	IncHasPrev, IncHasNext           bool
 }
 
 var serverTabs = map[string]bool{"network": true, "hardware": true, "live": true,
-	"traffic": true, "backups": true, "logs": true, "settings": true, "billing": true, "danger": true}
+	"traffic": true, "backups": true, "tasks": true, "ddos": true,
+	"logs": true, "settings": true, "billing": true, "danger": true}
 
 func serverPage(w http.ResponseWriter, r *http.Request, s *session) {
 	id := r.PathValue("id")
@@ -348,6 +354,8 @@ func serverPage(w http.ResponseWriter, r *http.Request, s *session) {
 				if tr.Max > 0 { // compute % ourselves; the API's example data is ambiguous
 					tr.NormalPercentage = float64(tr.Current) / float64(tr.Max) * 100
 				}
+				scaleTrafficBars(tr.History.Last30Days)
+				scaleTrafficBars(tr.History.Months)
 				sv.Traffic = &tr
 			}
 		}
@@ -355,21 +363,132 @@ func serverPage(w http.ResponseWriter, r *http.Request, s *session) {
 		if info.Display.Backup {
 			api.get("/service/"+pid+"/backup", &sv.Backups)
 		}
+	case "tasks":
+		api.get("/service/"+pid+"/cron", &sv.Cron)
+	case "ddos":
+		start, _ := strconv.Atoi(r.URL.Query().Get("start"))
+		start = max(start, 0)
+		sv.Search = strings.TrimSpace(r.URL.Query().Get("q"))
+		if len(sv.Search) > 64 {
+			sv.Search = sv.Search[:64]
+		}
+		var inc IncidentsPage
+		if api.get("/service/"+pid+"/incidents?start="+strconv.Itoa(start)+"&search="+url.QueryEscape(sv.Search), &inc) == nil {
+			sv.Incidents = &inc
+			step := max(inc.PageInfo.StepSize, 10)
+			sv.IncFrom = inc.PageInfo.Last
+			sv.IncTo = min(sv.IncFrom+step, inc.PageInfo.Total)
+			sv.IncHasPrev = start > 0
+			sv.IncPrev = max(sv.IncFrom-step, 0)
+			sv.IncNext = sv.IncFrom + step
+			sv.IncHasNext = sv.IncTo < inc.PageInfo.Total
+		}
+	case "settings":
+		if info.Display.CustomISO {
+			api.get("/service/"+pid+"/iso/custom/list", &sv.CustomISOs)
+		}
+		if info.Display.ISOMount {
+			// undocumented list endpoint — degrade to an empty select if missing
+			api.get("/service/"+pid+"/iso", &sv.ISOList)
+		}
 	case "logs":
 		api.get("/service/"+pid+"/actionlogs", &sv.Logs)
 	case "danger":
 		api.get("/service/"+pid+"/os", &sv.OSList)
 	}
+	sv.UplinkMB = int(info.Product.Uplink) / 10
+	sv.MaxUplinkMB = int(info.Product.MaxUplink) / 10
 
 	v := vd("Server", "services", s, r)
 	v.Data = sv
 	render(w, "server", v)
 }
 
+// order status codes per the official panel's JS
+func orderStatus(s int) (string, string) {
+	switch s {
+	case 0:
+		return "Unpaid", "err"
+	case 1, 2:
+		return "Completed", "ok"
+	case 3:
+		return "Canceled", "warn"
+	case 10:
+		return "Waiting for manual review", "warn"
+	}
+	return "Error", "err"
+}
+
+var orderTypes = map[string]string{
+	"kvmServerPacket": "KVM package", "saleServer": "Dedicated clearance", "saleNewServer": "Dedicated clearance",
+	"packetServer": "Dedicated package", "webspacePacket": "Webspace package", "orderGameserver": "Gameserver",
+	"invoice": "Invoice", "payByInvoice": "Invoice", "serviceAddon": "Addon", "serviceAutoRenew": "Auto-renew",
+	"renewServer": "Service extend", "serviceUpgrade": "Service upgrade", "topupcredit": "Top up credit",
+	"serviceMassRenew": "Mass renew", "nextcloudPacket": "Nextcloud package", "objectStorage": "Object storage",
+	"serviceAutoRenewInit": "Auto-renew init",
+}
+
+var brToSep = strings.NewReplacer("<br>", " · ", "<br/>", " · ", "<br />", " · ")
+
+type orderRow struct {
+	Order
+	StatusText, StatusClass, TypeText string
+}
+
+type ordersView struct {
+	Rows                 []orderRow
+	From, To, Total      int
+	PrevStart, NextStart int
+	HasPrev, HasNext     bool
+}
+
+func ordersPage(w http.ResponseWriter, r *http.Request, s *session) {
+	start, _ := strconv.Atoi(r.URL.Query().Get("start"))
+	if start < 0 || start > 1_000_000 {
+		start = 0
+	}
+	v := vd("Orders", "orders", s, r)
+	var op OrdersPage
+	if err := (API{token: s.token}).get("/user/"+url.PathEscape(s.userID)+"/orders?start="+strconv.Itoa(start), &op); err != nil {
+		if isAuthError(err) {
+			apiFail(w, r, "/orders", err)
+			return
+		}
+		if v.Err == "" {
+			v.Err = err.Error()
+		}
+	}
+	ov := ordersView{Total: op.PageInfo.Total}
+	for _, o := range op.Data {
+		o.OrderInfo = stripTags(brToSep.Replace(o.OrderInfo))
+		st, cls := orderStatus(int(o.Status))
+		tt := orderTypes[o.Type]
+		if tt == "" {
+			tt = o.Type
+		}
+		ov.Rows = append(ov.Rows, orderRow{Order: o, StatusText: st, StatusClass: cls, TypeText: tt})
+	}
+	step := op.PageInfo.StepSize
+	if step <= 0 {
+		step = 10
+	}
+	ov.From = op.PageInfo.Last
+	ov.To = ov.From + step
+	if ov.To > ov.Total {
+		ov.To = ov.Total
+	}
+	ov.HasPrev = start > 0
+	if ov.PrevStart = ov.From - step; ov.PrevStart < 0 {
+		ov.PrevStart = 0
+	}
+	ov.NextStart = ov.From + step
+	ov.HasNext = ov.To < ov.Total
+	v.Data = ov
+	render(w, "orders", v)
+}
+
 type accountView struct {
-	Invoices  []Invoice
-	Orders    []Order
-	CreditLog []CreditLogEntry
+	Invoices []Invoice
 }
 
 func accountPage(w http.ResponseWriter, r *http.Request, s *session) {
@@ -381,12 +500,515 @@ func accountPage(w http.ResponseWriter, r *http.Request, s *session) {
 		apiFail(w, r, "/account", err)
 		return
 	}
-	api.get(u+"/orders", &av.Orders)
-	api.get(u+"/credit/log", &av.CreditLog)
 
-	v := vd("Account", "account", s, r)
+	v := vd("Invoices", "account", s, r)
 	v.Data = av
 	render(w, "account", v)
+}
+
+// invoiceView proxies the invoice PDF through the panel so the API token
+// never reaches the browser. The spec leaves the response shape of
+// GET /user/{id}/invoice/{id} undocumented (Sevdesk pass-through), so accept
+// both a raw PDF body and a JSON envelope carrying it as base64.
+func invoiceView(w http.ResponseWriter, r *http.Request, s *session) {
+	id := r.PathValue("id")
+	data, err := (API{token: s.token}).getRaw("/user/" + url.PathEscape(s.userID) + "/invoice/" + url.PathEscape(id))
+	if err != nil {
+		apiFail(w, r, "/account", err)
+		return
+	}
+	if !bytes.HasPrefix(data, []byte("%PDF")) {
+		var v any
+		json.Unmarshal(data, &v)
+		if data = findPDF(v); data == nil {
+			apiFail(w, r, "/account", errors.New("invoice download unavailable"))
+			return
+		}
+	}
+	name := strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
+			return r
+		}
+		return -1
+	}, id)
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", `inline; filename="invoice-`+name+`.pdf"`)
+	w.Write(data)
+}
+
+// findPDF walks arbitrary decoded JSON for a base64 string that is a PDF.
+func findPDF(v any) []byte {
+	switch t := v.(type) {
+	case string:
+		clean := strings.NewReplacer("\n", "", "\r", "").Replace(t)
+		if dec, err := base64.StdEncoding.DecodeString(clean); err == nil && bytes.HasPrefix(dec, []byte("%PDF")) {
+			return dec
+		}
+	case map[string]any:
+		for _, c := range t {
+			if p := findPDF(c); p != nil {
+				return p
+			}
+		}
+	case []any:
+		for _, c := range t {
+			if p := findPDF(c); p != nil {
+				return p
+			}
+		}
+	}
+	return nil
+}
+
+func transactionsPage(w http.ResponseWriter, r *http.Request, s *session) {
+	var entries []CreditLogEntry
+	if err := (API{token: s.token}).get("/user/"+url.PathEscape(s.userID)+"/credit/log", &entries); isAuthError(err) {
+		apiFail(w, r, "/transactions", err)
+		return
+	}
+	v := vd("Transactions", "transactions", s, r)
+	v.Data = struct{ CreditLog []CreditLogEntry }{CreditLog: entries}
+	render(w, "transactions", v)
+}
+
+type donationsView struct {
+	Info      DonationInfo
+	Links     []DonationLink
+	Donations []Donation
+}
+
+func donationsPage(w http.ResponseWriter, r *http.Request, s *session) {
+	api := API{token: s.token}
+	u := "/user/" + url.PathEscape(s.userID)
+
+	dv := donationsView{}
+	if err := api.get(u+"/credit/donation/info", &dv.Info); isAuthError(err) {
+		apiFail(w, r, "/donations", err)
+		return
+	}
+	api.get(u+"/credit/donation/link/list", &dv.Links)
+	api.get(u+"/credit/donation/list", &dv.Donations)
+
+	v := vd("Donation links", "donations", s, r)
+	v.Data = dv
+	render(w, "donations", v)
+}
+
+func donationLinkCreate(w http.ResponseWriter, r *http.Request, s *session) {
+	name := strings.TrimSpace(r.PostFormValue("name"))
+	if name == "" || len(name) > 64 {
+		http.Error(w, "invalid link name", http.StatusBadRequest)
+		return
+	}
+	userAction(w, r, s, "/donations", "Donation link created.", func(api API, uid string) error {
+		return api.post("/user/"+uid+"/credit/donation/link", map[string]string{"link": name})
+	})
+}
+
+func donationLinkDelete(w http.ResponseWriter, r *http.Request, s *session) {
+	id := r.PostFormValue("id")
+	if !reUUID.MatchString(id) {
+		http.Error(w, "invalid link id", http.StatusBadRequest)
+		return
+	}
+	userAction(w, r, s, "/donations", "Donation link deleted.", func(api API, uid string) error {
+		return api.delete("/user/" + uid + "/credit/donation/link/" + id)
+	})
+}
+
+type affiliateView struct {
+	Info  AffiliateInfo
+	Links []AffiliateLink
+	Log   []AffiliateTransaction
+}
+
+func affiliatePage(w http.ResponseWriter, r *http.Request, s *session) {
+	api := API{token: s.token}
+	u := "/user/" + url.PathEscape(s.userID)
+
+	av := affiliateView{}
+	if err := api.get(u+"/affiliate/info", &av.Info); isAuthError(err) {
+		apiFail(w, r, "/affiliate", err)
+		return
+	}
+	api.get(u+"/affiliate", &av.Links)
+	api.get(u+"/affiliate/list", &av.Log)
+
+	v := vd("Affiliate links", "affiliate", s, r)
+	v.Data = av
+	render(w, "affiliate", v)
+}
+
+func affiliateLinkCreate(w http.ResponseWriter, r *http.Request, s *session) {
+	name := strings.TrimSpace(r.PostFormValue("name"))
+	if name == "" || len(name) > 64 {
+		http.Error(w, "invalid link name", http.StatusBadRequest)
+		return
+	}
+	userAction(w, r, s, "/affiliate", "Affiliate link created.", func(api API, uid string) error {
+		return api.post("/user/"+uid+"/affiliate", map[string]string{"name": name})
+	})
+}
+
+func affiliateLinkDelete(w http.ResponseWriter, r *http.Request, s *session) {
+	id := r.PostFormValue("id")
+	if !reUUID.MatchString(id) {
+		http.Error(w, "invalid link id", http.StatusBadRequest)
+		return
+	}
+	userAction(w, r, s, "/affiliate", "Affiliate link deleted.", func(api API, uid string) error {
+		return api.delete("/user/" + uid + "/affiliate/" + id)
+	})
+}
+
+/* ── top up credit ── */
+
+type payMethod struct {
+	ID, Name, Logo string
+	Crypto         bool
+}
+
+// payMethods mirrors the official panel's hardcoded payment method list;
+// logos are vendored copies of cdn.datalix.de/images/payment/* (CSP: img-src 'self').
+var payMethods = func() []payMethod {
+	ids := [][3]string{
+		{"paypal", "PayPal", "paypal.png"}, {"creditcard", "CreditCard", "cc.png"},
+		{"psc", "PaySafeCard", "paysafecard.svg"}, {"eps", "EPS", "eps.png"},
+		{"przelewy24", "Przelewy24", "przelewy24.svg"}, {"cryptocurrency-btc", "BTC", "bitcoin.webp"},
+		{"cryptocurrency-ltc", "Litecoin", "ltc.png"}, {"alipay", "Alipay", "alipay.png"},
+		{"cryptocurrency-xmr", "Monero", "monero.png"}, {"banktransfer", "Bank transfer", "sepa.png"},
+		{"ideal", "iDEAL", "ideal.svg"}, {"cryptocurrency-eth", "ETH", "ethereum.svg"},
+		{"cryptocurrency-bch", "BCH", "bitcoin-cash-bch-logo.svg"},
+		{"cryptocurrency-usdt.trc20", "USDT.TRC20", "tether-usdt-logo.png"},
+		{"cryptocurrency-usdt.prc20", "USDT.PRC20", "tether-usdt-logo.png"},
+		{"cryptocurrency-usdt.bep20", "USDT.BEP20", "tether-usdt-logo.png"},
+		{"cryptocurrency-btc.ln", "BTC.LN", "btc-ln-logo.png"},
+		{"cryptocurrency-USDC", "USDC", "usdc.webp"},
+		{"cryptocurrency-USDC.BEP20", "USDC.BEP20", "usdc.webp"},
+		{"cryptocurrency-USDC.PRC20", "USDC.PRC20", "usdc.webp"},
+		{"cryptocurrency-USDC.SOL", "USDC.SOL", "usdc.webp"},
+		{"cryptocurrency-SOL", "SOL", "solana-sol-logo.png"},
+		{"cryptocurrency-TRX", "TRX", "TRX.png"},
+	}
+	ms := make([]payMethod, len(ids))
+	for i, p := range ids {
+		ms[i] = payMethod{ID: p[0], Name: p[1], Logo: p[2], Crypto: strings.HasPrefix(p[0], "cryptocurrency")}
+	}
+	return ms
+}()
+
+func payMethodByID(id string) *payMethod {
+	for i := range payMethods {
+		if payMethods[i].ID == id {
+			return &payMethods[i]
+		}
+	}
+	return nil
+}
+
+type creditView struct {
+	Methods     []payMethod
+	Countries   []UserCountry
+	InvoiceData *InvoiceData
+	Open        string // payment method to re-open the modal for (after an invoice data save)
+}
+
+func creditPage(w http.ResponseWriter, r *http.Request, s *session) {
+	api := API{token: s.token}
+	u := "/user/" + url.PathEscape(s.userID)
+
+	cv := creditView{Methods: payMethods}
+	if err := api.get(u+"/countrys", &cv.Countries); isAuthError(err) {
+		apiFail(w, r, "/credit", err)
+		return
+	}
+	var inv InvoiceData
+	if api.get(u+"/invoicedata", &inv) == nil {
+		cv.InvoiceData = &inv
+	}
+	if m := payMethodByID(r.URL.Query().Get("open")); m != nil {
+		cv.Open = m.ID
+	}
+	v := vd("Top up credit", "credit", s, r)
+	v.Data = cv
+	render(w, "credit", v)
+}
+
+// creditTopup creates the credit order and forwards the browser to the payment
+// provider: POST credit/add → {id}, POST order/{id}/pay → provider URL.
+func creditTopup(w http.ResponseWriter, r *http.Request, s *session) {
+	amount := strings.TrimSpace(r.PostFormValue("amount"))
+	if a, err := strconv.ParseFloat(amount, 64); err != nil || a < 1 || a > 100000 {
+		http.Error(w, "invalid amount", http.StatusBadRequest)
+		return
+	}
+	method := payMethodByID(r.PostFormValue("method"))
+	if method == nil {
+		http.Error(w, "invalid payment method", http.StatusBadRequest)
+		return
+	}
+	if r.PostFormValue("tos") != "1" || r.PostFormValue("privacy") != "1" || r.PostFormValue("norefund") != "1" {
+		apiFail(w, r, "/credit", errors.New("Please accept the terms, the privacy policy and the credit conditions."))
+		return
+	}
+
+	api := API{token: s.token}
+	u := "/user/" + url.PathEscape(s.userID)
+
+	// tax country comes from the saved invoice data, like the official panel
+	var inv InvoiceData
+	api.get(u+"/invoicedata", &inv)
+	if inv.FirstName == "" || inv.LastName == "" || inv.Street == "" || inv.Zip == "" || inv.City == "" {
+		apiFail(w, r, "/credit", errors.New("Please fill in and save your invoice data first."))
+		return
+	}
+
+	var created struct {
+		ID Str `json:"id"`
+	}
+	if err := api.postOut(u+"/credit/add",
+		map[string]string{"amount": amount, "tax": string(inv.Country)}, &created); err != nil {
+		apiFail(w, r, "/credit", err)
+		return
+	}
+	if created.ID == "" {
+		apiFail(w, r, "/credit", errors.New("payment could not be created"))
+		return
+	}
+	payOrderRedirect(w, r, api, string(created.ID), method.ID, "/credit")
+}
+
+// payOrderRedirect finishes a payment: POST order/{id}/pay, then forward the
+// browser to the payment provider's checkout link.
+func payOrderRedirect(w http.ResponseWriter, r *http.Request, api API, orderID, method, target string) {
+	var pay struct {
+		URL  string `json:"url"`
+		Link string `json:"link"`
+	}
+	if err := api.postOut("/order/"+url.PathEscape(orderID)+"/pay",
+		map[string]string{"paymentMethod": method}, &pay); err != nil {
+		apiFail(w, r, target, err)
+		return
+	}
+	dest := pay.URL
+	if dest == "" {
+		dest = pay.Link
+	}
+	if !strings.HasPrefix(dest, "https://") {
+		apiFail(w, r, target, errors.New("payment provider returned no checkout link"))
+		return
+	}
+	http.Redirect(w, r, dest, http.StatusSeeOther)
+}
+
+// creditInvoiceData saves invoice data from the top-up modal and re-opens it.
+func creditInvoiceData(w http.ResponseWriter, r *http.Request, s *session) {
+	target := "/credit"
+	if m := payMethodByID(r.PostFormValue("method")); m != nil {
+		target = "/credit?open=" + url.QueryEscape(m.ID)
+	}
+	invoiceDataSubmit(w, r, s, target)
+}
+
+/* ── purchase by invoice ── */
+
+// fallback when GET /payment/paymentmethods (undocumented) is unavailable —
+// the static list from the official page's markup
+var pbiFallbackMethods = []PaymentMethodOption{
+	{Method: "paypal", Display: "PayPal"}, {Method: "sofort", Display: "Sofort"},
+	{Method: "psc", Display: "PaySafeCard"}, {Method: "creditcard", Display: "CreditCard (Mastercard, American Express, Visa, ApplePay)"},
+}
+
+var reToken = regexp.MustCompile(`^[A-Za-z0-9.-]{1,64}$`)
+
+// validPbiID accepts an invoice UUID or the API's synthetic "default" entry.
+func validPbiID(id string) bool { return id == "default" || reUUID.MatchString(id) }
+
+type pbiView struct {
+	Info       PayByInvoiceInfo
+	Unpaid     []UnpaidEntry
+	Invoices   []OwnInvoice
+	PayOptions []PaymentMethodOption
+}
+
+func paybyinvoicePage(w http.ResponseWriter, r *http.Request, s *session) {
+	api := API{token: s.token}
+	u := "/user/" + url.PathEscape(s.userID)
+
+	pv := pbiView{}
+	if err := api.get(u+"/credit/paybyinvoice/info", &pv.Info); isAuthError(err) {
+		apiFail(w, r, "/paybyinvoice", err)
+		return
+	}
+	api.get(u+"/credit/log/unpaid", &pv.Unpaid)
+	api.get(u+"/credit/paybyinvoice/list", &pv.Invoices)
+	if api.get("/payment/paymentmethods", &pv.PayOptions) != nil || len(pv.PayOptions) == 0 {
+		pv.PayOptions = pbiFallbackMethods
+	}
+
+	v := vd("Purchase by invoice", "paybyinvoice", s, r)
+	v.Data = pv
+	render(w, "paybyinvoice", v)
+}
+
+func pbiCreate(w http.ResponseWriter, r *http.Request, s *session) {
+	name := strings.TrimSpace(r.PostFormValue("name"))
+	if name == "" || len(name) > 64 {
+		http.Error(w, "invalid invoice name", http.StatusBadRequest)
+		return
+	}
+	userAction(w, r, s, "/paybyinvoice", "Own invoice created.", func(api API, uid string) error {
+		return api.post("/user/"+uid+"/credit/paybyinvoice", map[string]string{"name": name})
+	})
+}
+
+func pbiRename(w http.ResponseWriter, r *http.Request, s *session) {
+	id := r.PostFormValue("id")
+	name := strings.TrimSpace(r.PostFormValue("name"))
+	if !reUUID.MatchString(id) || name == "" || len(name) > 64 {
+		http.Error(w, "invalid invoice data", http.StatusBadRequest)
+		return
+	}
+	userAction(w, r, s, "/paybyinvoice", "Own invoice renamed.", func(api API, uid string) error {
+		return api.post("/user/"+uid+"/credit/paybyinvoice/"+id, map[string]string{"name": name})
+	})
+}
+
+func pbiReassign(w http.ResponseWriter, r *http.Request, s *session) {
+	invoice := r.PostFormValue("invoice")
+	transaction := r.PostFormValue("transaction")
+	if !validPbiID(invoice) || !reToken.MatchString(transaction) {
+		http.Error(w, "invalid reassignment", http.StatusBadRequest)
+		return
+	}
+	userAction(w, r, s, "/paybyinvoice", "Transaction reassigned.", func(api API, uid string) error {
+		return api.post("/user/"+uid+"/credit/paybyinvoice/transaction",
+			map[string]string{"invoice": invoice, "transaction": transaction})
+	})
+}
+
+func pbiPay(w http.ResponseWriter, r *http.Request, s *session) {
+	id := r.PostFormValue("id")
+	method := r.PostFormValue("paymentmethod")
+	if !validPbiID(id) || !reToken.MatchString(method) {
+		http.Error(w, "invalid payment", http.StatusBadRequest)
+		return
+	}
+	api := API{token: s.token}
+	payPath := "/user/" + url.PathEscape(s.userID) + "/credit/paybyinvoice/" + id + "/pay"
+	form := map[string]string{"paymentmethod": method}
+	// paying with credit settles immediately and returns no order to forward to
+	if method == "credit" {
+		if err := api.post(payPath, form); err != nil {
+			apiFail(w, r, "/paybyinvoice", err)
+			return
+		}
+		flashOK(w, r, "/paybyinvoice", "Invoice paid with credit.")
+		return
+	}
+	var created struct {
+		ID Str `json:"id"`
+	}
+	if err := api.postOut(payPath, form, &created); err != nil {
+		apiFail(w, r, "/paybyinvoice", err)
+		return
+	}
+	if created.ID == "" {
+		apiFail(w, r, "/paybyinvoice", errors.New("payment could not be created"))
+		return
+	}
+	payOrderRedirect(w, r, api, string(created.ID), method, "/paybyinvoice")
+}
+
+/* ── order ── */
+
+func orderPage(w http.ResponseWriter, r *http.Request, s *session) {
+	var packets []CatalogPacket
+	if err := (API{token: s.token}).get("/reseller/packet/list", &packets); isAuthError(err) {
+		apiFail(w, r, "/order", err)
+		return
+	}
+	v := vd("Order", "order", s, r)
+	v.Data = struct{ Packets []CatalogPacket }{Packets: packets}
+	render(w, "order", v)
+}
+
+type orderConfigView struct {
+	Packet     KVMPacket
+	OSList     []OSEntry
+	PayOptions []PaymentMethodOption
+}
+
+func orderConfigPage(w http.ResponseWriter, r *http.Request, s *session) {
+	pkt := r.PathValue("packet")
+	if !reUUID.MatchString(pkt) {
+		http.NotFound(w, r)
+		return
+	}
+	api := API{token: s.token}
+	ov := orderConfigView{}
+	if err := api.get("/kvmserver/packet/"+pkt, &ov.Packet); err != nil {
+		apiFail(w, r, "/order", err)
+		return
+	}
+	api.get("/kvmserver/packet/"+pkt+"/os", &ov.OSList)
+	if api.get("/payment/paymentmethods", &ov.PayOptions) != nil || len(ov.PayOptions) == 0 {
+		ov.PayOptions = pbiFallbackMethods
+	}
+	v := vd("Order", "order", s, r)
+	v.Data = ov
+	render(w, "order_config", v)
+}
+
+func orderSubmit(w http.ResponseWriter, r *http.Request, s *session) {
+	pkt := r.PathValue("packet")
+	osID := r.PostFormValue("os")
+	method := r.PostFormValue("paymentmethod")
+	ipcount := r.PostFormValue("ipcount")
+	if !reUUID.MatchString(pkt) || !reUUID.MatchString(osID) || !reToken.MatchString(method) {
+		http.Error(w, "invalid order", http.StatusBadRequest)
+		return
+	}
+	if n, err := strconv.Atoi(ipcount); err != nil || n < 0 || n > 64 {
+		http.Error(w, "invalid ip count", http.StatusBadRequest)
+		return
+	}
+	target := "/order/" + pkt
+	if r.PostFormValue("tos") != "1" || r.PostFormValue("privacy") != "1" {
+		apiFail(w, r, target, errors.New("Please accept the terms and the privacy policy."))
+		return
+	}
+
+	api := API{token: s.token}
+	var created struct {
+		ID Str `json:"id"`
+	}
+	if err := api.postOut("/order/kvmserver/"+pkt, map[string]string{
+		"paymentMethod": method, "os": osID, "ipcount": ipcount, "credit": chk(r, "credit"),
+	}, &created); err != nil {
+		apiFail(w, r, target, err)
+		return
+	}
+	if created.ID == "" {
+		apiFail(w, r, target, errors.New("order could not be created"))
+		return
+	}
+	// pay the order; when credit covers it fully there is no checkout link
+	var pay struct {
+		URL  string `json:"url"`
+		Link string `json:"link"`
+	}
+	err := api.postOut("/order/"+url.PathEscape(string(created.ID))+"/pay",
+		map[string]string{"paymentMethod": method}, &pay)
+	dest := pay.URL
+	if dest == "" {
+		dest = pay.Link
+	}
+	if err == nil && strings.HasPrefix(dest, "https://") {
+		http.Redirect(w, r, dest, http.StatusSeeOther)
+		return
+	}
+	flashOK(w, r, "/orders", "Order placed — check its status below.")
 }
 
 type ticketsView struct {
@@ -580,6 +1202,10 @@ func validInvoiceField(v string, required bool) bool {
 var reCountryID = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
 
 func settingsInvoiceData(w http.ResponseWriter, r *http.Request, s *session) {
+	invoiceDataSubmit(w, r, s, "/settings")
+}
+
+func invoiceDataSubmit(w http.ResponseWriter, r *http.Request, s *session, target string) {
 	f := func(k string) string { return strings.TrimSpace(r.PostFormValue(k)) }
 	firstname, lastname := f("firstname"), f("lastname")
 	street, zip, city, company := f("street"), f("zip"), f("city"), f("company")
@@ -591,7 +1217,7 @@ func settingsInvoiceData(w http.ResponseWriter, r *http.Request, s *session) {
 		http.Error(w, "invalid invoice data", http.StatusBadRequest)
 		return
 	}
-	userAction(w, r, s, "/settings", "Invoice data saved.", func(api API, uid string) error {
+	userAction(w, r, s, target, "Invoice data saved.", func(api API, uid string) error {
 		return api.post("/user/"+uid+"/invoicedata",
 			map[string]string{"firstname": firstname, "lastname": lastname, "street": street,
 				"zip": zip, "city": city, "company": company, "country": country})
@@ -668,19 +1294,18 @@ func serviceAction(w http.ResponseWriter, r *http.Request, s *session, tab, okMs
 	flashOK(w, r, target, okMsg)
 }
 
-var powerActions = map[string]string{
-	"start": "/start", "stop": "/stop", "restart": "/restart",
-	"shutdown": "/shutdown", "forcestop": "/forcestop",
+var powerActions = map[string]bool{
+	"start": true, "stop": true, "restart": true, "shutdown": true, "forcestop": true,
 }
 
 func serverPower(w http.ResponseWriter, r *http.Request, s *session) {
-	path, ok := powerActions[r.PostFormValue("action")]
-	if !ok {
+	action := r.PostFormValue("action")
+	if !powerActions[action] {
 		http.Error(w, "unknown action", http.StatusBadRequest)
 		return
 	}
 	serviceAction(w, r, s, "", "Power command sent.", func(api API, id string) error {
-		return api.post("/service/"+id+path, nil)
+		return api.post("/service/"+id+"/"+action, nil)
 	})
 }
 
@@ -697,12 +1322,15 @@ func serverRename(w http.ResponseWriter, r *http.Request, s *session) {
 
 func serverHostname(w http.ResponseWriter, r *http.Request, s *session) {
 	hostname := strings.TrimSpace(r.PostFormValue("hostname"))
-	if !reHostname.MatchString(hostname) {
+	reset := chk(r, "reset")
+	if reset == "1" {
+		hostname = "reset" // the API resets to the generated default
+	} else if !reHostname.MatchString(hostname) {
 		http.Error(w, "invalid hostname", http.StatusBadRequest)
 		return
 	}
 	serviceAction(w, r, s, "settings", "Hostname updated.", func(api API, id string) error {
-		return api.post("/service/"+id+"/hostname", map[string]string{"hostname": hostname, "reset": "0"})
+		return api.post("/service/"+id+"/hostname", map[string]string{"hostname": hostname, "reset": reset})
 	})
 }
 
@@ -801,6 +1429,301 @@ func serverAutorenew(w http.ResponseWriter, r *http.Request, s *session) {
 			return api.post("/service/"+id+"/autorenew/credit", nil)
 		}
 		return api.delete("/service/" + id + "/autorenew/credit")
+	})
+}
+
+// serverAutorenewPayment sets up auto-renew via PayPal/credit card; enabling
+// forwards the browser to the provider to authorize the automatic payment.
+func serverAutorenewPayment(w http.ResponseWriter, r *http.Request, s *session) {
+	id := r.PathValue("id")
+	if !reUUID.MatchString(id) {
+		http.NotFound(w, r)
+		return
+	}
+	target := "/server/" + id + "?tab=billing"
+	api := API{token: s.token}
+	if r.PostFormValue("enable") != "1" {
+		if err := api.delete("/service/" + url.PathEscape(id) + "/autorenew/payment"); err != nil {
+			apiFail(w, r, target, err)
+			return
+		}
+		flashOK(w, r, target, "Auto-renew via payment disabled.")
+		return
+	}
+	method := r.PostFormValue("paymentmethod")
+	if method != "paypal" && method != "creditcard" {
+		http.Error(w, "invalid payment method", http.StatusBadRequest)
+		return
+	}
+	var resp struct {
+		URL string `json:"url"`
+	}
+	if err := api.postOut("/service/"+url.PathEscape(id)+"/autorenew/payment",
+		map[string]string{"paymentmethod": method}, &resp); err != nil {
+		apiFail(w, r, target, err)
+		return
+	}
+	if !strings.HasPrefix(resp.URL, "https://") {
+		apiFail(w, r, target, errors.New("payment provider returned no setup link"))
+		return
+	}
+	http.Redirect(w, r, resp.URL, http.StatusSeeOther)
+}
+
+func ipParam(w http.ResponseWriter, r *http.Request) (string, bool) {
+	ip := strings.TrimSpace(r.PostFormValue("ip"))
+	if net.ParseIP(ip) == nil {
+		http.Error(w, "invalid ip", http.StatusBadRequest)
+		return "", false
+	}
+	return ip, true
+}
+
+// serverProtStatus — undocumented endpoint (used by the official panel).
+func serverProtStatus(w http.ResponseWriter, r *http.Request, s *session) {
+	ip, ok := ipParam(w, r)
+	if !ok {
+		return
+	}
+	status := r.PostFormValue("status")
+	if status != "dynamic" && status != "permanent" {
+		http.Error(w, "invalid protection status", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "network", "DDoS protection changed — this can take a few minutes to apply.",
+		func(api API, id string) error {
+			return api.post("/service/"+id+"/prot/status", map[string]string{"ip": ip, "status": status})
+		})
+}
+
+func serverIPNote(w http.ResponseWriter, r *http.Request, s *session) {
+	ip, ok := ipParam(w, r)
+	if !ok {
+		return
+	}
+	note := strings.TrimSpace(r.PostFormValue("note"))
+	kind := "ip"
+	if r.PostFormValue("v6") == "1" {
+		kind = "ipv6"
+	}
+	if len(note) > 128 || strings.ContainsFunc(note, unicode.IsControl) {
+		http.Error(w, "invalid note", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "network", "Note saved.", func(api API, id string) error {
+		return api.post("/service/"+id+"/note/"+kind, map[string]string{"ip": ip, "note": note})
+	})
+}
+
+// serverRDNS6Set creates or updates the rDNS entry of a single IPv6 address.
+func serverRDNS6Set(w http.ResponseWriter, r *http.Request, s *session) {
+	ip, ok := ipParam(w, r)
+	if !ok {
+		return
+	}
+	rdns := strings.TrimSpace(r.PostFormValue("rdns"))
+	if !reHostname.MatchString(rdns) {
+		http.Error(w, "invalid rdns", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "network", "IPv6 rDNS saved.", func(api API, id string) error {
+		return api.post("/service/"+id+"/ip/"+url.PathEscape(ip), map[string]string{"rdns": rdns})
+	})
+}
+
+func serverRDNS6Delete(w http.ResponseWriter, r *http.Request, s *session) {
+	ip, ok := ipParam(w, r)
+	if !ok {
+		return
+	}
+	serviceAction(w, r, s, "network", "IPv6 rDNS entry deleted.", func(api API, id string) error {
+		return api.delete("/service/" + id + "/ip/" + url.PathEscape(ip))
+	})
+}
+
+func serverTrafficNotify(w http.ResponseWriter, r *http.Request, s *session) {
+	serviceAction(w, r, s, "traffic", "Traffic notification setting saved.", func(api API, id string) error {
+		return api.post("/service/"+id+"/traffic/notify", map[string]string{"status": chk(r, "status")})
+	})
+}
+
+func serverAttackNotify(w http.ResponseWriter, r *http.Request, s *session) {
+	serviceAction(w, r, s, "ddos", "DDoS notification setting saved.", func(api API, id string) error {
+		return api.post("/service/"+id+"/attack/notify", map[string]string{"status": chk(r, "status")})
+	})
+}
+
+// serverFeatureToggle handles TPM and UEFI add/remove, which share a URL shape.
+func serverFeatureToggle(feature string) func(http.ResponseWriter, *http.Request, *session) {
+	return func(w http.ResponseWriter, r *http.Request, s *session) {
+		op := "remove"
+		if r.PostFormValue("enable") == "1" {
+			op = "add"
+		}
+		serviceAction(w, r, s, "hardware", strings.ToUpper(feature)+" change applied.",
+			func(api API, id string) error {
+				return api.post("/service/"+id+"/"+feature+"/"+op, nil)
+			})
+	}
+}
+
+func serverUplink(w http.ResponseWriter, r *http.Request, s *session) {
+	uplink := r.PostFormValue("uplink")
+	if v, err := strconv.Atoi(uplink); err != nil || v < 1 || v > 100000 {
+		http.Error(w, "invalid uplink", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "hardware", "Uplink changed.", func(api API, id string) error {
+		return api.post("/service/"+id+"/uplink", map[string]string{"uplink": uplink})
+	})
+}
+
+func serverBackupRename(w http.ResponseWriter, r *http.Request, s *session) {
+	b, ok := backupParam(w, r)
+	if !ok {
+		return
+	}
+	name := strings.TrimSpace(r.PostFormValue("name"))
+	if name == "" || len(name) > 64 || strings.ContainsFunc(name, unicode.IsControl) {
+		http.Error(w, "invalid backup name", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "backups", "Backup renamed.", func(api API, id string) error {
+		return api.post("/service/"+id+"/backup/rename", map[string]string{"backup": b, "name": name})
+	})
+}
+
+// serverBackupLock locks (lock=1) or unlocks a backup against cron cleanup.
+func serverBackupLock(w http.ResponseWriter, r *http.Request, s *session) {
+	b, ok := backupParam(w, r)
+	if !ok {
+		return
+	}
+	op, msg := "unlock", "Backup unlocked — cron jobs may delete it again."
+	if r.PostFormValue("lock") == "1" {
+		op, msg = "lock", "Backup locked — cron jobs will not delete it."
+	}
+	serviceAction(w, r, s, "backups", msg, func(api API, id string) error {
+		return api.post("/service/"+id+"/backup/"+b+"/"+op, nil)
+	})
+}
+
+var cronActions = map[string]bool{"start": true, "stop": true, "shutdown": true, "reset": true, "backup": true}
+var reCronExpr = regexp.MustCompile(`^[0-9*/,-]+ [0-9*/,-]+ [0-9*/,-]+ [0-9*/,-]+ [0-9*/,-]+$`)
+
+func cronFields(w http.ResponseWriter, r *http.Request) (map[string]string, bool) {
+	name := strings.TrimSpace(r.PostFormValue("name"))
+	expr := strings.TrimSpace(r.PostFormValue("expression"))
+	action := r.PostFormValue("action")
+	if name == "" || len(name) > 64 || strings.ContainsFunc(name, unicode.IsControl) ||
+		!reCronExpr.MatchString(expr) || !cronActions[action] {
+		http.Error(w, "invalid scheduled task", http.StatusBadRequest)
+		return nil, false
+	}
+	return map[string]string{"name": name, "expression": expr, "action": action}, true
+}
+
+func serverCronCreate(w http.ResponseWriter, r *http.Request, s *session) {
+	form, ok := cronFields(w, r)
+	if !ok {
+		return
+	}
+	serviceAction(w, r, s, "tasks", "Scheduled task created.", func(api API, id string) error {
+		return api.post("/service/"+id+"/cron", form)
+	})
+}
+
+func serverCronEdit(w http.ResponseWriter, r *http.Request, s *session) {
+	cronID := r.PostFormValue("cron")
+	form, ok := cronFields(w, r)
+	if !ok {
+		return
+	}
+	if !reToken.MatchString(cronID) {
+		http.Error(w, "invalid task id", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "tasks", "Scheduled task saved.", func(api API, id string) error {
+		return api.post("/service/"+id+"/cron/"+url.PathEscape(cronID), form)
+	})
+}
+
+func serverCronDelete(w http.ResponseWriter, r *http.Request, s *session) {
+	cronID := r.PostFormValue("cron")
+	if !reToken.MatchString(cronID) {
+		http.Error(w, "invalid task id", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "tasks", "Scheduled task deleted.", func(api API, id string) error {
+		return api.delete("/service/" + id + "/cron/" + url.PathEscape(cronID) + "/delete")
+	})
+}
+
+// scaleTrafficBars fills the bar-chart percentages relative to the series peak.
+func scaleTrafficBars(pts []TrafficPoint) {
+	var peak float64
+	for _, p := range pts {
+		peak = max(peak, max(float64(p.In), float64(p.Out)))
+	}
+	if peak == 0 {
+		return
+	}
+	for i := range pts {
+		pts[i].InPct = int(float64(pts[i].In) / peak * 100)
+		pts[i].OutPct = int(float64(pts[i].Out) / peak * 100)
+	}
+}
+
+// serverISOMountStd inserts a Datalix-provided ISO (stops the server).
+func serverISOMountStd(w http.ResponseWriter, r *http.Request, s *session) {
+	isoID := r.PostFormValue("iso")
+	if !reUUID.MatchString(isoID) {
+		http.Error(w, "invalid iso id", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "settings", "ISO inserted — start the server manually.", func(api API, id string) error {
+		return api.post("/service/"+id+"/iso", map[string]string{"iso": isoID})
+	})
+}
+
+// serverISORemove ejects a mounted ISO; this is also how rescue mode is disabled.
+func serverISORemove(w http.ResponseWriter, r *http.Request, s *session) {
+	serviceAction(w, r, s, "", "ISO ejected / rescue disabled.", func(api API, id string) error {
+		return api.delete("/service/" + id + "/iso")
+	})
+}
+
+func serverCustomISOAdd(w http.ResponseWriter, r *http.Request, s *session) {
+	link := strings.TrimSpace(r.PostFormValue("url"))
+	if !strings.HasPrefix(link, "https://") && !strings.HasPrefix(link, "http://") || len(link) > 512 {
+		http.Error(w, "invalid iso url", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "settings", "ISO download started.", func(api API, id string) error {
+		return api.post("/service/"+id+"/iso/custom", map[string]string{"url": link})
+	})
+}
+
+// serverCustomISOMount mounts or unmounts a custom ISO (same endpoint toggles).
+func serverCustomISOMount(w http.ResponseWriter, r *http.Request, s *session) {
+	isoID := r.PostFormValue("iso")
+	if !reUUID.MatchString(isoID) {
+		http.Error(w, "invalid iso id", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "settings", "ISO mount state changed.", func(api API, id string) error {
+		return api.post("/service/"+id+"/iso/custom/"+isoID+"/mount", nil)
+	})
+}
+
+func serverCustomISODelete(w http.ResponseWriter, r *http.Request, s *session) {
+	isoID := r.PostFormValue("iso")
+	if !reUUID.MatchString(isoID) {
+		http.Error(w, "invalid iso id", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "settings", "Custom ISO deleted.", func(api API, id string) error {
+		return api.delete("/service/" + id + "/iso/custom/" + isoID)
 	})
 }
 
@@ -932,4 +1855,162 @@ func apiLive(w http.ResponseWriter, r *http.Request, s *session) {
 	var ld LiveData
 	// livedata is rate-limited to 30 req / 15 min by Datalix — cache hard
 	cachedAPI(w, r, s, "live", "/livedata", 45*time.Second, &ld)
+}
+
+/* ── access manager ── */
+
+type accessPermGroup struct {
+	PID   string
+	Perms []AccessPerm
+}
+
+type accessRow struct {
+	AccessEntry
+	Date  string
+	Has   map[string]bool
+	Perms []AccessPerm
+}
+
+type accessView struct {
+	Key      string
+	Granted  []accessRow
+	Requests []accessRow
+	Services []Service
+	Groups   []accessPermGroup
+}
+
+func accessRowOf(e AccessEntry, perms map[string][]AccessPerm) accessRow {
+	row := accessRow{AccessEntry: e, Date: string(e.CreatedOn), Has: map[string]bool{},
+		Perms: perms[strconv.Itoa(int(e.ProductID))]}
+	row.Name = cleanName(row.Name)
+	// the request list sends unix timestamps, the granted list date strings
+	if n, err := strconv.ParseInt(string(e.CreatedOn), 10, 64); err == nil && n > 0 {
+		row.Date = time.Unix(n, 0).UTC().Format("02.01.2006 15:04")
+	}
+	for _, en := range e.Entrys {
+		row.Has[en.Perm] = true
+	}
+	return row
+}
+
+func accessPage(w http.ResponseWriter, r *http.Request, s *session) {
+	api := API{token: s.token}
+	u := "/user/" + url.PathEscape(s.userID)
+	var granted, requests []AccessEntry
+	if err := api.get(u+"/access/list", &granted); isAuthError(err) {
+		apiFail(w, r, "/", err)
+		return
+	}
+	api.get(u+"/access/list/request", &requests)
+	perms := map[string][]AccessPerm{}
+	api.get("/user/access/info", &perms)
+	var ki struct {
+		UserInfo struct {
+			AccessKey string `json:"accesskey"`
+		} `json:"userInfo"`
+	}
+	api.get("/user/apikey/"+url.PathEscape(s.token), &ki)
+
+	av := accessView{Key: ki.UserInfo.AccessKey}
+	var all []Service
+	api.get("/service/list?type=active", &all)
+	seen := map[string]bool{}
+	for _, sv := range all {
+		if int(sv.ProductID) == 3 { // webspace cannot be shared (official panel skips it too)
+			continue
+		}
+		sv.Name = cleanName(sv.Name)
+		av.Services = append(av.Services, sv)
+		pid := strconv.Itoa(int(sv.ProductID))
+		if !seen[pid] && len(perms[pid]) > 0 {
+			seen[pid] = true
+			av.Groups = append(av.Groups, accessPermGroup{PID: pid, Perms: perms[pid]})
+		}
+	}
+	for _, e := range granted {
+		av.Granted = append(av.Granted, accessRowOf(e, perms))
+	}
+	for _, e := range requests {
+		av.Requests = append(av.Requests, accessRowOf(e, perms))
+	}
+	v := vd("Access", "access", s, r)
+	v.Data = av
+	render(w, "access", v)
+}
+
+// permsForm collects the checked permissions as the PHP-style repeated
+// "permissions[]" field the backend expects.
+func permsForm(r *http.Request, name string) url.Values {
+	form := url.Values{"name": {name}}
+	for _, p := range r.PostForm["perm"] {
+		if p != "" && len(p) <= 64 && !strings.ContainsFunc(p, unicode.IsControl) {
+			form.Add("permissions[]", p)
+		}
+	}
+	return form
+}
+
+func accessCreate(w http.ResponseWriter, r *http.Request, s *session) {
+	sid := r.PostFormValue("service")
+	key := strings.TrimSpace(r.PostFormValue("key"))
+	name := strings.TrimSpace(r.PostFormValue("name"))
+	if !reUUID.MatchString(sid) || key == "" || len(key) > 64 || len(name) > 64 {
+		http.Error(w, "invalid access request", http.StatusBadRequest)
+		return
+	}
+	form := permsForm(r, name)
+	form.Set("key", key)
+	if err := (API{token: s.token}).postValues("/service/"+url.PathEscape(sid)+"/access", form); err != nil {
+		apiFail(w, r, "/access", err)
+		return
+	}
+	flashOK(w, r, "/access", "Invitation sent.")
+}
+
+func accessEdit(w http.ResponseWriter, r *http.Request, s *session) {
+	id := r.PostFormValue("id")
+	name := strings.TrimSpace(r.PostFormValue("name"))
+	if !reUUID.MatchString(id) || len(name) > 64 {
+		http.Error(w, "invalid access id", http.StatusBadRequest)
+		return
+	}
+	err := (API{token: s.token}).postValues(
+		"/user/"+url.PathEscape(s.userID)+"/access/"+url.PathEscape(id), permsForm(r, name))
+	if err != nil {
+		apiFail(w, r, "/access", err)
+		return
+	}
+	flashOK(w, r, "/access", "Access saved.")
+}
+
+// accessAction handles delete (verb "") plus accept/deny on an access id.
+func accessAction(verb, okMsg string) func(http.ResponseWriter, *http.Request, *session) {
+	return func(w http.ResponseWriter, r *http.Request, s *session) {
+		id := r.PostFormValue("id")
+		if !reUUID.MatchString(id) {
+			http.Error(w, "invalid access id", http.StatusBadRequest)
+			return
+		}
+		userAction(w, r, s, "/access", okMsg, func(api API, uid string) error {
+			p := "/user/" + uid + "/access/" + url.PathEscape(id)
+			if verb == "" {
+				return api.delete(p)
+			}
+			return api.post(p+"/"+verb, nil)
+		})
+	}
+}
+
+/* ── emaillog ── */
+
+func emaillogPage(w http.ResponseWriter, r *http.Request, s *session) {
+	api := API{token: s.token}
+	var logs []EmailLogEntry
+	if err := api.get("/user/"+url.PathEscape(s.userID)+"/email/log", &logs); isAuthError(err) {
+		apiFail(w, r, "/", err)
+		return
+	}
+	v := vd("Emaillog", "emaillog", s, r)
+	v.Data = struct{ Logs []EmailLogEntry }{logs}
+	render(w, "emaillog", v)
 }

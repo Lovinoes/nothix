@@ -49,7 +49,7 @@
   --r:    2px;   /* Nothing = sharp */
   --r-lg: 4px;
   --sidebar-w: 232px;
-  /* display scale — the whole UI zooms by this factor; vh-based heights
+  /* display scale — the app containers zoom by this factor; vh-based heights
      divide by it so full-height elements stay exactly one viewport tall */
   --z: 1.05;
 }
@@ -57,10 +57,14 @@
 @media (min-width: 2200px) { :root { --z: 1.18; } }
 @media (max-width: 900px)  { :root { --z: 1; } }
 
-html { zoom: var(--z); }
+/* zoom the containers INSIDE body, never html/body: password managers
+   (Bitwarden etc.) append their autofill overlay to <body> and position it
+   from getBoundingClientRect — a zoomed ancestor would scale the overlay's
+   coordinates a second time and drift it away from the field */
+.app, .login-viewport { zoom: var(--z); }
 
 body {
-  min-height: calc(100vh / var(--z));
+  min-height: 100vh;
   background: var(--bg);
   background-image: radial-gradient(circle at 1px 1px, #141414 1px, transparent 0);
   background-size: 4px 4px;
@@ -167,6 +171,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   font-family: var(--font-mono);
   font-size: 11px; color: var(--fg-3);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sidebar-user:hover { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
+.sidebar-foot .btn:hover, .sidebar-foot .btn:focus-visible {
+  border-color: var(--red); color: var(--red); background: rgba(215, 25, 33, 0.12);
 }
 
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -403,7 +411,7 @@ label {
   font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
   color: var(--fg-3); margin-bottom: 6px;
 }
-input[type=text], input[type=password], input[type=url], select, textarea {
+input[type=text], input[type=password], input[type=url], input[type=number], select, textarea {
   width: 100%;
   background: var(--bg-2);
   border: 1px solid var(--line);
@@ -541,9 +549,11 @@ select option { background: var(--bg-2); color: var(--fg); }
 .footer {
   border-top: 1px solid var(--line);
   padding: 14px 20px;
-  font-size: 10px; color: var(--fg-4);
+  font-size: 10px; color: var(--fg-3);
   letter-spacing: 0.14em; text-transform: uppercase;
-  display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  display: flex; flex-direction: column; gap: 4px;
+  position: sticky; bottom: 0; z-index: 5;
+  background: var(--bg);
 }
 
 @media (max-width: 900px) {
@@ -557,4 +567,160 @@ select option { background: var(--bg-2); color: var(--fg); }
   .kv { grid-template-columns: 1fr; }
   .kv dt { border-bottom: 0; padding-bottom: 2px; }
   .kv dd { padding-left: 0; }
+}
+
+/* ── TOP UP CREDIT: payment grid + modal ── */
+.pay-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.pay-card {
+  display: flex; flex-direction: column; gap: 4px; align-items: center;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 18px 12px;
+  color: var(--fg);
+  font-family: var(--font-ui); font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, transform 0.12s;
+}
+.pay-card:hover, .pay-card:focus-visible { border-color: var(--fg-4); background: var(--bg-2); transform: translateY(-1px); }
+.pay-card small { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-3); }
+/* white chip behind each logo so dark marks stay visible on the black theme */
+.pay-logo {
+  height: 34px; width: auto; max-width: 100px;
+  object-fit: contain;
+  background: #fff; border-radius: 6px; padding: 4px 7px;
+  margin-bottom: 6px;
+}
+
+dialog.modal {
+  /* the global margin reset removes the UA's dialog centering — restore it */
+  position: fixed; inset: 0; margin: auto;
+  width: min(720px, 92vw);
+  height: fit-content;
+  max-height: min(86vh, 900px);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  color: var(--fg);
+  padding: 20px 22px;
+  overflow-y: auto;
+  /* smooth open/close (falls back to instant show where unsupported) */
+  opacity: 0; transform: translateY(10px) scale(0.985);
+  transition: opacity 0.22s ease, transform 0.22s ease,
+    overlay 0.22s ease allow-discrete, display 0.22s ease allow-discrete;
+}
+dialog.modal[open] { opacity: 1; transform: none; }
+@starting-style {
+  dialog.modal[open] { opacity: 0; transform: translateY(10px) scale(0.985); }
+}
+dialog.modal::backdrop {
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(3px);
+  opacity: 0;
+  transition: opacity 0.22s ease, overlay 0.22s ease allow-discrete, display 0.22s ease allow-discrete;
+}
+dialog.modal[open]::backdrop { opacity: 1; }
+@starting-style {
+  dialog.modal[open]::backdrop { opacity: 0; }
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.modal-title { font-family: var(--font-display); font-size: 17px; letter-spacing: 0.05em; text-transform: uppercase; }
+
+dialog.modal.modal-sm { width: min(440px, 92vw); }
+
+/* ── LOGIN RISK NOTICE + THIRD-PARTY FOOTER ── */
+.login-risk {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 16px;
+  border: 1px solid var(--red);
+  border-radius: var(--r);
+  background: rgba(215, 25, 33, 0.10);
+  padding: 8px 10px;
+  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--red);
+}
+.login-risk::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--red); flex: none;
+  animation: livepulse 1.4s infinite;
+}
+.footer-notice a { color: var(--fg-2); text-decoration: underline; text-underline-offset: 3px; }
+
+/* ── SERVER PAGE: sidebar login data, live charts, traffic bars ── */
+/* stack labels over values so long secrets don't wrap letter by letter */
+.reveal .kv { grid-template-columns: 1fr; }
+.reveal .kv dt { border-bottom: 0; padding-bottom: 2px; }
+.reveal .kv dd { padding-left: 0; padding-top: 0; overflow-wrap: anywhere; }
+
+.live-chart {
+  display: block; width: 100%; height: 140px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.bars {
+  display: flex; align-items: flex-end; gap: 3px;
+  height: 140px; padding-top: 6px;
+}
+.bars > div { flex: 1; min-width: 4px; height: 100%; display: flex; align-items: flex-end; gap: 1px; }
+.bars i { display: block; width: 50%; min-height: 1px; border-radius: 1px 1px 0 0; }
+.bars i.in { background: var(--green); }
+.bars i.out { background: var(--fg-3); }
+
+/* amber notice (noVNC redirect hint etc.) — same shape as the login risk box */
+.notice-warn {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--amber);
+  border-radius: var(--r);
+  background: rgba(255, 176, 32, 0.10);
+  padding: 8px 10px;
+  font-size: 11px; letter-spacing: 0.04em;
+  color: var(--amber);
+  margin-bottom: 14px;
+}
+.notice-warn::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--amber); flex: none;
+  animation: livepulse 1.4s infinite;
+}
+
+/* ── censored values (blur until hover/focus) ── */
+.blur:focus-visible, .blur:focus-within { filter: none; }
+.pin-copy {
+  background: none; border: 0; padding: 0;
+  font: inherit; letter-spacing: inherit; color: inherit;
+  cursor: pointer;
+}
+form.censor input[type="text"], form.censor input[type="url"] {
+  filter: blur(4px); transition: filter 0.3s ease;
+}
+form.censor input[type="text"]:hover, form.censor input[type="text"]:focus,
+form.censor input[type="url"]:hover, form.censor input[type="url"]:focus { filter: none; }
+
+/* small "+" next to the credit value → top up */
+.stat-add {
+  font-family: var(--font-ui); font-size: 16px;
+  color: var(--fg-3); margin-left: 6px;
+  border: 1px solid var(--line-2); border-radius: var(--r);
+  padding: 0 6px; display: inline-block; line-height: 1.4;
+  vertical-align: 3px;
+}
+.stat-add:hover { color: var(--fg); border-color: var(--fg-3); }
+
+/* dashboard activity feed: compact, full history scrolls */
+.activity-scroll { max-height: 236px; overflow-y: auto; }
+
+/* access page permission trees */
+.perm-set { border: 0; padding: 0; margin: 12px 0 0; }
+.perm-set legend { padding: 0; }
+.perm-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 6px 16px;
+}
+.perm-sub { margin-left: 20px; }
+
+/* modal close buttons turn red on hover, like logout */
+button.btn[data-close]:hover, button.btn[data-close]:focus-visible {
+  border-color: var(--red); color: var(--red); background: rgba(215, 25, 33, 0.12);
 }

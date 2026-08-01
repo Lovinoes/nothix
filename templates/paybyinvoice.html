@@ -1,0 +1,157 @@
+{{define "content"}}
+<div class="page-head">
+  <h1 class="page-title">Purchase by invoice</h1>
+  <span class="page-sub">Accounting · Credit limit · Unpaid positions</span>
+</div>
+
+{{with .Data}}
+<section class="sec">
+  <h2 class="sec-label">Overview</h2>
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-k">Available limit</div>
+      <div class="stat-v">{{printf "%.2f" .Info.Limit}} <small>EUR</small></div>
+      <div class="stat-foot"><a href="/tickets/new">request increase</a></div>
+    </div>
+    <div class="stat">
+      <div class="stat-k">Status</div>
+      <div class="stat-v">{{if eq .Info.Status 1.0}}Active{{else}}Inactive{{end}}</div>
+      <div class="stat-foot"><a href="/tickets/new">request activation</a></div>
+    </div>
+    <div class="stat">
+      <div class="stat-k">Usage</div>
+      <div class="stat-v">{{printf "%.2f" .Info.Used}} <small>EUR</small></div>
+      <div class="stat-foot"><a href="/tickets/new">request increase</a></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <h2 class="sec-label">Open positions</h2>
+  <div class="card tbl-scroll">
+    {{if .Unpaid}}
+    <table class="tbl">
+      <tr><th>Amount</th><th>Reason</th><th>Invoice</th><th>Date</th></tr>
+      {{range .Unpaid}}
+      <tr>
+        <td><strong{{if eq .Type "-"}} style="color:var(--red)"{{else}} style="color:var(--green)"{{end}}>{{.Type}} {{printf "%.2f" .Change}} €</strong></td>
+        <td>{{.Display}}{{if .AdditionalData}}<br><span class="mono-sm">{{.AdditionalData}}</span>{{end}}</td>
+        <td>
+          {{.InvoiceDisplayName}}
+          <button class="btn pbi-reassign" type="button" data-invoice="{{.Invoice}}" data-transaction="{{.ID}}" style="margin-left:8px">reassign</button>
+        </td>
+        <td>{{fmtUnixTime .CreatedOn}}</td>
+      </tr>
+      {{end}}
+    </table>
+    {{else}}<p class="mono-sm">No open positions.</p>{{end}}
+  </div>
+</section>
+
+<section class="sec">
+  <h2 class="sec-label">Own invoices</h2>
+  <div class="card tbl-scroll">
+    <div class="btn-row" style="margin-bottom:12px">
+      <button class="btn" type="button" id="pbi-create-open">create own invoice</button>
+    </div>
+    {{if .Invoices}}
+    <table class="tbl">
+      <tr><th>Name</th><th>Usage</th><th></th></tr>
+      {{range .Invoices}}
+      <tr>
+        <td><strong>{{.Name}}</strong></td>
+        <td>{{printf "%.2f" .Total}} €</td>
+        <td style="text-align:right">
+          <div class="btn-row" style="justify-content:flex-end">
+            {{if ne .ID "default"}}<button class="btn pbi-edit" type="button" data-id="{{.ID}}" data-name="{{.Name}}">edit</button>{{end}}
+            <button class="btn btn-primary pbi-pay" type="button" data-id="{{.ID}}">pay</button>
+          </div>
+        </td>
+      </tr>
+      {{end}}
+    </table>
+    {{else}}<p class="mono-sm">No invoices.</p>{{end}}
+  </div>
+</section>
+
+<dialog id="pbi-create-modal" class="modal modal-sm">
+  <div class="modal-head">
+    <h2 class="modal-title">Create own invoice</h2>
+  </div>
+  <form method="post" action="/paybyinvoice/create">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <div class="field">
+      <label for="pbi-create-name">Name</label>
+      <input type="text" id="pbi-create-name" name="name" maxlength="64" required>
+    </div>
+    <div class="btn-row" style="justify-content:flex-end">
+      <button class="btn" type="button" data-close>close</button>
+      <button class="btn btn-primary" type="submit">create</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="pbi-edit-modal" class="modal modal-sm">
+  <div class="modal-head">
+    <h2 class="modal-title">Edit own invoice</h2>
+  </div>
+  <form method="post" action="/paybyinvoice/rename">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="id">
+    <div class="field">
+      <label for="pbi-edit-name">Name</label>
+      <input type="text" id="pbi-edit-name" name="name" maxlength="64" required>
+    </div>
+    <div class="btn-row" style="justify-content:flex-end">
+      <button class="btn" type="button" data-close>close</button>
+      <button class="btn btn-primary" type="submit">save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="pbi-reassign-modal" class="modal modal-sm">
+  <div class="modal-head">
+    <h2 class="modal-title">Reassign transaction</h2>
+  </div>
+  <form method="post" action="/paybyinvoice/reassign">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="transaction">
+    <div class="field">
+      <label for="pbi-reassign-invoice">Invoice</label>
+      <select id="pbi-reassign-invoice" name="invoice">
+        {{range .Invoices}}
+        <option value="{{.ID}}">{{.Name}} ({{printf "%.2f" .Total}} €)</option>
+        {{end}}
+      </select>
+    </div>
+    <div class="btn-row" style="justify-content:flex-end">
+      <button class="btn" type="button" data-close>close</button>
+      <button class="btn btn-primary" type="submit">save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="pbi-pay-modal" class="modal modal-sm">
+  <div class="modal-head">
+    <h2 class="modal-title">Pay invoice</h2>
+  </div>
+  <form method="post" action="/paybyinvoice/pay">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="id">
+    <div class="field">
+      <label for="pbi-pay-method">Payment method</label>
+      <select id="pbi-pay-method" name="paymentmethod">
+        {{range .PayOptions}}
+        <option value="{{.Method}}">{{.Display}}</option>
+        {{end}}
+        <option value="credit">Pay with credit</option>
+      </select>
+    </div>
+    <div class="btn-row" style="justify-content:flex-end">
+      <button class="btn" type="button" data-close>close</button>
+      <button class="btn btn-primary" type="submit">pay</button>
+    </div>
+  </form>
+</dialog>
+{{end}}
+{{end}}

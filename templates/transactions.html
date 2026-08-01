@@ -1,0 +1,25 @@
+{{define "content"}}
+<div class="page-head">
+  <h1 class="page-title">Transactions</h1>
+  <span class="page-sub">Accounting · Your last credit movements</span>
+</div>
+
+{{with .Data}}
+<section class="sec">
+  <div class="card tbl-scroll">
+    {{if .CreditLog}}
+    <table class="tbl">
+      <tr><th>Change</th><th>Reason</th><th>Date</th></tr>
+      {{range .CreditLog}}
+      <tr>
+        <td><strong{{if eq .Type "-"}} style="color:var(--red)"{{else}} style="color:var(--green)"{{end}}>{{.Type}} {{printf "%.2f" .Change}} €</strong></td>
+        <td>{{.Display}}</td>
+        <td>{{fmtUnixTime .CreatedOn}}</td>
+      </tr>
+      {{end}}
+    </table>
+    {{else}}<p class="mono-sm">No transactions.</p>{{end}}
+  </div>
+</section>
+{{end}}
+{{end}}

@@ -25,7 +25,7 @@
   </div>
   <div class="hero-actions">
     <a class="btn" href="/support">Contact support</a>
-    <a class="btn btn-primary" href="https://datalix.eu" rel="noopener noreferrer">Order new product</a>
+    <a class="btn btn-primary" href="/order">Order new product</a>
   </div>
 </section>
 
@@ -35,7 +35,8 @@
   <div class="stats">
     <div class="stat">
       <div class="stat-k">Credit</div>
-      <div class="stat-v">{{printf "%.2f" .Dashboard.Credit}} <small>EUR</small></div>
+      <div class="stat-v">{{printf "%.2f" .Dashboard.Credit}} <small>EUR</small>
+        <a class="stat-add" href="/credit" title="Top up credit" aria-label="Top up credit">+</a></div>
       <div class="stat-foot">
         <form method="post" action="/account/redeem" class="redeem-row">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
@@ -46,7 +47,8 @@
     </div>
     <div class="stat">
       <div class="stat-k">Support PIN</div>
-      <div class="stat-v">{{if .Dashboard.SupportPin}}{{.Dashboard.SupportPin}}{{else}}—{{end}}</div>
+      <div class="stat-v">{{if .Dashboard.SupportPin}}<button class="pin-copy blur" type="button"
+        data-copy="{{.Dashboard.SupportPin}}" title="hover to reveal · click to copy">{{.Dashboard.SupportPin}}</button>{{else}}—{{end}}</div>
       <div class="stat-foot"><a href="/support">generate new</a></div>
     </div>
     <div class="stat">
@@ -65,7 +67,7 @@
 {{if .Dashboard.Activity}}
 <section class="sec">
   <h2 class="sec-label">Latest activities</h2>
-  <div class="card tbl-scroll">
+  <div class="card tbl-scroll activity-scroll">
     <table class="tbl">
       <tr><th>Activity</th><th style="text-align:right">Time</th></tr>
       {{range .Dashboard.Activity}}
@@ -78,8 +80,8 @@
 {{end}}
 
 <section class="sec" id="servers">
-  <h2 class="sec-label">KVM Servers</h2>
-  {{if .Servers}}
+  <h2 class="sec-label">Services</h2>
+  {{if or .Servers .Others}}
   <div class="grid">
     {{range .Servers}}
     <a class="srv-card" href="/server/{{.ID}}">
@@ -95,32 +97,28 @@
       </div>
     </a>
     {{end}}
+    {{range .Others}}
+    <a class="srv-card" href="https://datalix.de/cp/service/{{.ID}}" rel="noopener noreferrer">
+      <div>
+        <div class="srv-name">{{if .Name}}{{.Name}}{{else}}{{.ProductDisplay}}{{end}}</div>
+        <div class="srv-id">{{.ID}}</div>
+      </div>
+      <span class="status pending" data-status-id="{{.ID}}">…</span>
+      <div class="srv-meta">
+        <span>Price <strong>{{printf "%.2f" .Price}} €</strong></span>
+        <span>Expires <strong>{{fmtUnix .ExpireAt}}</strong></span>
+        {{if .DeleteAt}}<span style="color:var(--red)">Deletion {{fmtUnix .DeleteAt}}</span>{{end}}
+        <span>{{.ProductDisplay}} — managed in the official panel ↗</span>
+      </div>
+    </a>
+    {{end}}
   </div>
   {{else}}
   <div class="card">
-    <p class="mono-sm">No KVM servers on this account. Order one at
-    <a href="https://datalix.eu" rel="noopener noreferrer" style="text-decoration:underline">datalix.eu</a>.</p>
+    <p class="mono-sm">No services on this account. Order one on the
+    <a href="/order" style="text-decoration:underline">order page</a>.</p>
   </div>
   {{end}}
 </section>
-
-{{if .Others}}
-<section class="sec">
-  <h2 class="sec-label">Other services (not managed here)</h2>
-  <div class="card tbl-scroll">
-    <table class="tbl">
-      <tr><th>Product</th><th>Name</th><th>Price</th><th>Expires</th></tr>
-      {{range .Others}}
-      <tr>
-        <td><strong>{{.ProductDisplay}}</strong></td>
-        <td>{{if .Name}}{{.Name}}{{else}}—{{end}}</td>
-        <td>{{printf "%.2f" .Price}} €</td>
-        <td>{{fmtUnix .ExpireAt}}</td>
-      </tr>
-      {{end}}
-    </table>
-  </div>
-</section>
-{{end}}
 {{end}}
 {{end}}

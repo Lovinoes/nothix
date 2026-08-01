@@ -1,0 +1,172 @@
+{{define "content"}}
+<div class="page-head">
+  <h1 class="page-title">Access</h1>
+  <span class="page-sub">Share service management with other Datalix accounts</span>
+</div>
+
+{{with .Data}}
+<section class="sec">
+  <h2 class="sec-label">Your access code</h2>
+  <div class="card">
+    <p class="mono-sm" style="margin-bottom:8px">Give this code to another customer so they can invite you to one of their services.</p>
+    <div class="pin-display">{{if .Key}}<button class="pin-copy blur" type="button"
+      data-copy="{{.Key}}" title="hover to reveal · click to copy">{{.Key}}</button>{{else}}—{{end}}</div>
+  </div>
+</section>
+
+<section class="sec">
+  <h2 class="sec-label">Access you granted</h2>
+  <div class="card">
+    {{if .Services}}
+    <button class="btn btn-primary" type="button" data-dlg="access-create-modal">create access</button>
+    {{end}}
+    {{if .Granted}}
+    <div class="tbl-scroll" style="margin-top:14px">
+    <table class="tbl">
+      <tr><th>Name</th><th>Status</th><th>Service</th><th>Date</th><th></th></tr>
+      {{range .Granted}}
+      <tr>
+        <td><strong>{{if .Name}}{{.Name}}{{else}}—{{end}}</strong></td>
+        <td>{{if eq .Status 2.0}}<span class="chip ok">Active</span>{{else if eq .Status 3.0}}<span class="chip err">Denied</span>{{else}}<span class="chip warn">Pending</span>{{end}}</td>
+        <td class="mono-sm">{{.ServiceID}}</td>
+        <td>{{.Date}}</td>
+        <td style="text-align:right">
+          <div class="btn-row" style="justify-content:flex-end">
+            {{if .Perms}}<button class="btn" type="button" data-dlg="access-edit-{{.ID}}">edit</button>{{end}}
+            <form method="post" action="/access/delete" data-confirm="Delete this access? The invited user loses access to the service.">
+              <input type="hidden" name="csrf" value="{{$.CSRF}}">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <button class="btn btn-danger" type="submit">delete</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {{end}}
+    </table>
+    </div>
+    {{else}}<p class="mono-sm" style="margin-top:12px">You have not granted anyone access.</p>{{end}}
+  </div>
+</section>
+
+<section class="sec">
+  <h2 class="sec-label">Open requests</h2>
+  <div class="card">
+    {{if .Requests}}
+    <p class="mono-sm" style="margin-bottom:10px">Invitations from other customers — accepting lets you manage their service in the official panel.</p>
+    <div class="tbl-scroll">
+    <table class="tbl">
+      <tr><th>Name</th><th>Service</th><th>Date</th><th></th></tr>
+      {{range .Requests}}
+      <tr>
+        <td><strong>{{if .Name}}{{.Name}}{{else}}—{{end}}</strong></td>
+        <td class="mono-sm">{{.ServiceID}}</td>
+        <td>{{.Date}}</td>
+        <td style="text-align:right">
+          <div class="btn-row" style="justify-content:flex-end">
+            <form method="post" action="/access/accept">
+              <input type="hidden" name="csrf" value="{{$.CSRF}}">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <button class="btn btn-primary" type="submit">accept</button>
+            </form>
+            <form method="post" action="/access/deny" data-confirm="Deny this access request?">
+              <input type="hidden" name="csrf" value="{{$.CSRF}}">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <button class="btn btn-danger" type="submit">deny</button>
+            </form>
+          </div>
+        </td>
+      </tr>
+      {{end}}
+    </table>
+    </div>
+    {{else}}<p class="mono-sm">No open access requests.</p>{{end}}
+  </div>
+</section>
+
+{{if .Services}}
+<dialog id="access-create-modal" class="modal">
+  <div class="modal-head">
+    <h2 class="modal-title">Create access</h2>
+  </div>
+  <form method="post" action="/access/create">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <div class="field">
+      <label for="access-service">Service</label>
+      <select id="access-service" name="service">
+        {{range .Services}}
+        <option value="{{.ID}}" data-pid="{{printf "%.0f" .ProductID}}">{{.ProductDisplay}}{{if .Name}} — {{.Name}}{{end}}{{if .IP}} — {{.IP}}{{end}} ({{.ID}})</option>
+        {{end}}
+      </select>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="access-name">Display name</label>
+        <input type="text" id="access-name" name="name" maxlength="64">
+      </div>
+      <div class="field">
+        <label for="access-key">Invitation code (the other user's access code)</label>
+        <input type="text" id="access-key" name="key" maxlength="64" required>
+      </div>
+    </div>
+    {{range .Groups}}
+    <fieldset class="perm-set" data-pid="{{.PID}}" hidden disabled>
+      <legend class="sec-label" style="margin-bottom:8px">Permissions</legend>
+      <div class="perm-grid">
+        {{range .Perms}}
+        {{$p := .}}
+        <div>
+          <label class="check"><input type="checkbox" name="perm" value="{{.Name}}"> {{.Header}}</label>
+          {{range .Sub}}
+          <label class="check perm-sub"><input type="checkbox" name="perm" value="{{.Name}}" data-parent="{{$p.Name}}"> {{.Header}}</label>
+          {{end}}
+        </div>
+        {{end}}
+      </div>
+    </fieldset>
+    {{end}}
+    <div class="btn-row" style="justify-content:flex-end;margin-top:12px">
+      <button class="btn" type="button" data-close>close</button>
+      <button class="btn btn-primary" type="submit">create</button>
+    </div>
+  </form>
+</dialog>
+{{end}}
+
+{{range .Granted}}
+{{if .Perms}}
+<dialog id="access-edit-{{.ID}}" class="modal">
+  <div class="modal-head">
+    <h2 class="modal-title">Edit access</h2>
+  </div>
+  <form method="post" action="/access/edit">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="id" value="{{.ID}}">
+    <div class="field">
+      <label for="access-edit-name-{{.ID}}">Display name</label>
+      <input type="text" id="access-edit-name-{{.ID}}" name="name" maxlength="64" value="{{.Name}}">
+    </div>
+    {{$has := .Has}}
+    <fieldset class="perm-set">
+      <legend class="sec-label" style="margin-bottom:8px">Permissions</legend>
+      <div class="perm-grid">
+        {{range .Perms}}
+        {{$p := .}}
+        <div>
+          <label class="check"><input type="checkbox" name="perm" value="{{.Name}}" {{if index $has .Name}}checked{{end}}> {{.Header}}</label>
+          {{range .Sub}}
+          <label class="check perm-sub"><input type="checkbox" name="perm" value="{{.Name}}" data-parent="{{$p.Name}}" {{if index $has .Name}}checked{{end}}> {{.Header}}</label>
+          {{end}}
+        </div>
+        {{end}}
+      </div>
+    </fieldset>
+    <div class="btn-row" style="justify-content:flex-end;margin-top:12px">
+      <button class="btn" type="button" data-close>close</button>
+      <button class="btn btn-primary" type="submit">save</button>
+    </div>
+  </form>
+</dialog>
+{{end}}
+{{end}}
+{{end}}
+{{end}}

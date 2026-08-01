@@ -9,7 +9,8 @@
   <h2 class="sec-label">Support PIN</h2>
   <div class="card">
     <p class="mono-sm">Give this PIN to Datalix support to verify your identity.</p>
-    <div class="pin-display">{{if .Pin}}{{.Pin}}{{else}}——————{{end}}</div>
+    <div class="pin-display">{{if .Pin}}<button class="pin-copy blur" type="button"
+      data-copy="{{.Pin}}" title="hover to reveal · click to copy">{{.Pin}}</button>{{else}}——————{{end}}</div>
     <form method="post" action="/support/pin" data-confirm="Generate a new support PIN? The old one becomes invalid.">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
       <button class="btn" type="submit">generate new pin</button>

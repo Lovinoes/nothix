@@ -113,7 +113,8 @@
 <section class="sec">
   <h2 class="sec-label">Invoice data</h2>
   <div class="card">
-    <form method="post" action="/settings/invoicedata">
+    <p class="mono-sm" style="margin-bottom:12px">Values are blurred — hover or focus a field to reveal it.</p>
+    <form method="post" action="/settings/invoicedata" class="censor">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
       <div class="field-row">
         <div class="field"><label for="firstname">First name</label>
@@ -196,11 +197,12 @@
 <section class="sec">
   <h2 class="sec-label">Notifications</h2>
   <p class="mono-sm" style="margin-bottom:14px">More about POST webhooks in the
-    <a href="https://datalix.eu/wiki/general/postwebhook/" rel="noopener noreferrer" style="text-decoration:underline">wiki</a>.</p>
+    <a href="https://datalix.eu/wiki/general/postwebhook/" rel="noopener noreferrer" style="text-decoration:underline">wiki</a>.
+    Webhook URLs are blurred — hover or focus a field to reveal it.</p>
   {{if .Notifications}}
   {{range .Notifications}}
   <div class="card">
-    <form method="post" action="/settings/notify">
+    <form method="post" action="/settings/notify" class="censor">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
       <input type="hidden" name="type" value="{{.Type}}">
       <p style="font-size:12px;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:12px">{{.DisplayName}}</p>
@@ -239,7 +241,7 @@
       {{range .Sessions}}
       <tr>
         <td class="mono-sm">{{.ID}}</td>
-        <td>{{.IP}}</td>
+        <td><span class="blur">{{.IP}}</span></td>
         <td>{{.CreatedOn}}</td>
         <td>{{.ExpireAt}}</td>
         <td>

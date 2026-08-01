@@ -1,0 +1,88 @@
+{{define "content"}}
+<div class="page-head">
+  <h1 class="page-title">Affiliate links</h1>
+  <span class="page-sub">Accounting · Manage your affiliate links · Payouts</span>
+</div>
+
+{{with .Data}}
+<section class="sec">
+  <h2 class="sec-label">Overview</h2>
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-k">Active links</div>
+      <div class="stat-v">{{printf "%.0f" .Info.LinkCount}}</div>
+    </div>
+    <div class="stat">
+      <div class="stat-k">Being processed</div>
+      <div class="stat-v">{{printf "%.2f" .Info.MoneyHold}} <small>EUR</small></div>
+      <div class="stat-foot">approved after 24 h, credited as credit</div>
+    </div>
+    <div class="stat">
+      <div class="stat-k">Money received</div>
+      <div class="stat-v">{{printf "%.2f" .Info.TotalMoney}} <small>EUR</small></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <h2 class="sec-label">Create link</h2>
+  <div class="card">
+    <form method="post" action="/affiliate/create">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <div class="field-row" style="gap:6px;align-items:flex-end">
+        <div class="field" style="margin:0;max-width:240px">
+          <label for="af-name">Name</label>
+          <input type="text" id="af-name" name="name" maxlength="64" required>
+        </div>
+        <button class="btn" type="submit">create link</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+<section class="sec">
+  <h2 class="sec-label">Affiliate links</h2>
+  <div class="card tbl-scroll">
+    {{if .Links}}
+    <table class="tbl">
+      <tr><th>Name</th><th>Link</th><th>Active services</th><th>Predicted monthly revenue</th><th></th></tr>
+      {{range .Links}}
+      <tr>
+        <td><strong>{{.Name}}</strong></td>
+        <td><a href="https://datalix.de/a/{{.Name}}" target="_blank" rel="noopener" style="text-decoration:underline;text-underline-offset:3px">https://datalix.de/a/{{.Name}}</a></td>
+        <td>{{printf "%.0f" .ServiceCount}}</td>
+        <td>{{printf "%.2f" .ServiceRevenue}} €</td>
+        <td style="text-align:right">
+          <form method="post" action="/affiliate/delete" data-confirm="Delete affiliate link {{.Name}}?">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button class="btn btn-danger" type="submit">delete</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </table>
+    {{else}}<p class="mono-sm">No affiliate links.</p>{{end}}
+  </div>
+</section>
+
+<section class="sec">
+  <h2 class="sec-label">Last 10 transactions</h2>
+  <div class="card tbl-scroll">
+    {{if .Log}}
+    <table class="tbl">
+      <tr><th>Link</th><th>Amount</th><th>Status</th><th>Date</th></tr>
+      {{range .Log}}
+      <tr>
+        <td><strong>{{.Link}}</strong></td>
+        <td><strong style="color:var(--green)">+ {{printf "%.2f" .Amount}} €</strong></td>
+        <td>{{if eq .Status 0.0}}<span class="chip warn">Being processed</span>{{else}}<span class="chip ok">Paid</span>{{end}}</td>
+        <td>{{fmtUnixTime .CreatedOn}}</td>
+      </tr>
+      {{end}}
+    </table>
+    {{else}}<p class="mono-sm">No transactions yet.</p>{{end}}
+  </div>
+</section>
+{{end}}
+{{end}}

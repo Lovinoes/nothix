@@ -4,8 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<meta name="referrer" content="no-referrer">
-<title>{{.Title}} · Datalix Panel</title>
+<title>{{.Title}} · Nothix</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23080808'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23d71921'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/panel.css">
 <script src="/static/panel.js" defer></script>
@@ -15,7 +14,7 @@
 <aside class="sidebar">
   <a class="brand" href="/">
     <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-    <span class="brand-name">Datalix</span>
+    <span class="brand-name">Nothix</span>
   </a>
   <div class="dots-strip" aria-hidden="true"></div>
   <nav class="snav" aria-label="Main">
@@ -34,18 +33,27 @@
     </div>
     <div class="snav-group">
       <div class="snav-label">Accounting</div>
-      <a href="/account" {{if eq .Page "account"}}class="active"{{end}}>Account &amp; Billing</a>
+      <a href="/orders" {{if eq .Page "orders"}}class="active"{{end}}>Orders</a>
+      <a href="/paybyinvoice" {{if eq .Page "paybyinvoice"}}class="active"{{end}}>Purchase by invoice</a>
+      <a href="/transactions" {{if eq .Page "transactions"}}class="active"{{end}}>Transactions</a>
+      <a href="/account" {{if eq .Page "account"}}class="active"{{end}}>Invoices</a>
+      <a href="/donations" {{if eq .Page "donations"}}class="active"{{end}}>Donation links</a>
+      <a href="/affiliate" {{if eq .Page "affiliate"}}class="active"{{end}}>Affiliate links</a>
+      <a href="/credit" {{if eq .Page "credit"}}class="active"{{end}}>Top up credit</a>
     </div>
     <div class="snav-group">
       <div class="snav-label">Other</div>
+      <a href="/order" {{if eq .Page "order"}}class="active"{{end}}>Order</a>
       <a href="/settings" {{if eq .Page "settings"}}class="active"{{end}}>Settings</a>
+      <a href="/access" {{if eq .Page "access"}}class="active"{{end}}>Access</a>
+      <a href="/emaillog" {{if eq .Page "emaillog"}}class="active"{{end}}>Emaillog</a>
       <a href="https://apidoc.datalix.de/" rel="noopener noreferrer">API Docs ↗</a>
       <a href="https://wiki.datalix.eu/en" rel="noopener noreferrer">Wiki ↗</a>
       <a href="https://status.datalix.de/" rel="noopener noreferrer">Status ↗</a>
     </div>
   </nav>
   <div class="sidebar-foot">
-    <span class="sidebar-user">{{if .User}}{{.User}}{{else}}signed in{{end}}</span>
+    <a class="sidebar-user" href="/settings" title="Settings">{{if .User}}{{.User}}{{else}}signed in{{end}}</a>
     <form method="post" action="/logout">
       <input type="hidden" name="csrf" value="{{.CSRF}}">
       <button class="btn" type="submit">Logout</button>
@@ -59,8 +67,9 @@
     {{template "content" .}}
   </main>
   <footer class="footer">
-    <span>Datalix Panel · KVM</span>
-    <span>Unofficial client panel · powered by backend.datalix.de</span>
+    <span>Nothix — Third-party panel</span>
+    <span class="footer-notice">not affiliated with Datalix ·
+      <a href="https://github.com/Lovinoes/datalix-panel" rel="noopener noreferrer">Lovinoes/nothix ↗</a></span>
   </footer>
 </div>
 </div>

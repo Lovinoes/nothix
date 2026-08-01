@@ -1,19 +1,18 @@
 {{define "content"}}
 <div class="page-head">
-  <h1 class="page-title">Account</h1>
-  <span class="page-sub">Billing · Invoices · Orders</span>
+  <h1 class="page-title">Invoices</h1>
+  <span class="page-sub">Accounting · Your invoices</span>
 </div>
 
 {{with .Data}}
 <section class="sec">
-  <h2 class="sec-label">Invoices</h2>
   <div class="card tbl-scroll">
     {{if .Invoices}}
     <table class="tbl">
       <tr><th>Number</th><th>Date</th><th>Sum</th><th>Status</th></tr>
       {{range .Invoices}}
       <tr>
-        <td><strong>{{.InvoiceNumber}}</strong></td>
+        <td>{{if .ID}}<a href="/invoice/{{.ID}}" target="_blank" rel="noopener" style="text-decoration:underline;text-underline-offset:3px"><strong>{{.InvoiceNumber}}</strong></a>{{else}}<strong>{{.InvoiceNumber}}</strong>{{end}}</td>
         <td>{{.Create}}</td>
         <td>{{printf "%.2f" .Sum}} €</td>
         <td>{{if eq .Status 1}}paid{{else}}<span style="color:var(--red)">open</span>{{end}}</td>
@@ -21,43 +20,6 @@
       {{end}}
     </table>
     {{else}}<p class="mono-sm">No invoices.</p>{{end}}
-  </div>
-</section>
-
-<section class="sec">
-  <h2 class="sec-label">Orders</h2>
-  <div class="card tbl-scroll">
-    {{if .Orders}}
-    <table class="tbl">
-      <tr><th>Order</th><th>Date</th><th>Price</th><th>Paid</th></tr>
-      {{range .Orders}}
-      <tr>
-        <td><strong>{{.DisplayForClient}}</strong></td>
-        <td>{{fmtUnix .CreatedOn}}</td>
-        <td>{{printf "%.2f" .Price}} €</td>
-        <td>{{if .Paid}}yes{{else}}<span style="color:var(--red)">no</span>{{end}}</td>
-      </tr>
-      {{end}}
-    </table>
-    {{else}}<p class="mono-sm">No orders.</p>{{end}}
-  </div>
-</section>
-
-<section class="sec">
-  <h2 class="sec-label">Credit log</h2>
-  <div class="card tbl-scroll">
-    {{if .CreditLog}}
-    <table class="tbl">
-      <tr><th>Date</th><th>Change</th><th>Reason</th></tr>
-      {{range .CreditLog}}
-      <tr>
-        <td>{{fmtUnix .CreatedOn}}</td>
-        <td><strong>{{.Type}}{{printf "%.2f" .Change}} €</strong></td>
-        <td>{{.Display}}</td>
-      </tr>
-      {{end}}
-    </table>
-    {{else}}<p class="mono-sm">No credit movements.</p>{{end}}
   </div>
 </section>
 

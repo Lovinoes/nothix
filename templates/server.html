@@ -6,10 +6,23 @@
 </div>
 <p class="srv-id" style="margin:-16px 0 22px">{{.ID}}</p>
 
+{{if .Info.Product.ConfigChanged}}
+<div class="flash err" role="alert">Your server has changes that have not been applied (e.g. purchased upgrades). Stop and start the server for them to become active.</div>
+{{end}}
+{{if .Info.Product.Rescue}}
+<div class="flash err" role="alert">Rescue mode is active — disable it on the Danger tab to use the server normally.</div>
+{{end}}
+{{if .Info.Product.TrafficLimitHit}}
+<div class="flash err" role="alert">The monthly traffic limit has been reached — the service is throttled to 10 MB/s (80 Mbit/s).</div>
+{{end}}
+{{if .Info.Product.PortBlock}}
+<div class="flash" role="status">Mail ports are blocked by default — contact support to have them unlocked.</div>
+{{end}}
+
 <div class="srv-layout">
 
   <aside>
-    <div class="card side-card">
+    <div class="card">
       <div class="stat-k">Expires in</div>
       <div class="stat-v">{{daysLeft .Info.Service.ExpireAt}}</div>
       <div class="mono-sm" style="margin-top:4px">{{fmtUnix .Info.Service.ExpireAt}} · {{printf "%.2f" .Info.Service.Price}} €/mo</div>
@@ -34,6 +47,9 @@
           <input type="hidden" name="action" value="forcestop">
           <button class="btn btn-danger" type="submit">force stop</button>
         </form>
+        {{if .Info.Display.NoVNC}}
+        <button class="btn" type="button" id="novnc-open">noVNC console</button>
+        {{end}}
         <a class="btn" href="/server/{{.ID}}?tab=billing">extend / renew</a>
         {{if .Info.Display.Backup}}
         <form method="post" action="/server/{{.ID}}/backup">
@@ -68,6 +84,8 @@
       {{if .Info.Display.LiveData}}<a href="/server/{{.ID}}?tab=live" {{if eq .Tab "live"}}class="active"{{end}}>Live</a>{{end}}
       {{if .Info.Display.Traffic}}<a href="/server/{{.ID}}?tab=traffic" {{if eq .Tab "traffic"}}class="active"{{end}}>Traffic</a>{{end}}
       {{if .Info.Display.Backup}}<a href="/server/{{.ID}}?tab=backups" {{if eq .Tab "backups"}}class="active"{{end}}>Backups</a>{{end}}
+      {{if .Info.Display.Cron}}<a href="/server/{{.ID}}?tab=tasks" {{if eq .Tab "tasks"}}class="active"{{end}}>Tasks</a>{{end}}
+      {{if .Info.Display.DDoSLog}}<a href="/server/{{.ID}}?tab=ddos" {{if eq .Tab "ddos"}}class="active"{{end}}>DDoS</a>{{end}}
       <a href="/server/{{.ID}}?tab=logs" {{if eq .Tab "logs"}}class="active"{{end}}>Log</a>
       <a href="/server/{{.ID}}?tab=settings" {{if eq .Tab "settings"}}class="active"{{end}}>Settings</a>
       <a href="/server/{{.ID}}?tab=billing" {{if eq .Tab "billing"}}class="active"{{end}}>Billing</a>
@@ -81,19 +99,37 @@
       <h2 class="sec-label">IPv4 addresses</h2>
       <div class="card tbl-scroll">
         <table class="tbl">
-          <tr><th>IP</th><th>Gateway</th><th>Netmask</th><th>rDNS</th><th></th></tr>
+          <tr><th>IP</th><th>Gateway</th><th>Netmask</th><th>rDNS</th><th>Protection</th><th>Note</th></tr>
           {{range .IPs.IPv4}}
           <tr>
             <td><strong>{{.IP}}</strong> <button class="copy-btn" type="button" data-copy="{{.IP}}">copy</button></td>
             <td>{{.GW}}</td>
             <td>{{.Netmask}}</td>
-            <td>{{.RDNS}}</td>
             <td>
-              <form method="post" action="/server/{{$.Data.ID}}/rdns" class="field-row" style="align-items:center;gap:6px">
+              <form method="post" action="/server/{{$.Data.ID}}/rdns" class="field-row" style="align-items:center;gap:6px;flex-wrap:nowrap">
                 <input type="hidden" name="csrf" value="{{$.CSRF}}">
                 <input type="hidden" name="ip" value="{{.IP}}">
-                <input type="text" name="rdns" placeholder="new rdns" style="min-width:140px">
+                <input type="text" name="rdns" value="{{.RDNS}}" style="min-width:150px">
                 <button class="btn" type="submit">set</button>
+              </form>
+            </td>
+            <td>
+              <form method="post" action="/server/{{$.Data.ID}}/protstatus" class="field-row" style="align-items:center;gap:6px;flex-wrap:nowrap">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="ip" value="{{.IP}}">
+                <select name="status" style="min-width:110px">
+                  <option value="dynamic" {{if eq .ProtStatus "dynamic"}}selected{{end}}>dynamic</option>
+                  <option value="permanent" {{if eq .ProtStatus "permanent"}}selected{{end}}>permanent</option>
+                </select>
+                <button class="btn" type="submit">set</button>
+              </form>
+            </td>
+            <td>
+              <form method="post" action="/server/{{$.Data.ID}}/ipnote" class="field-row" style="align-items:center;gap:6px;flex-wrap:nowrap">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="ip" value="{{.IP}}">
+                <input type="text" name="note" maxlength="128" value="{{.Note}}" style="min-width:110px">
+                <button class="btn" type="submit">save</button>
               </form>
             </td>
           </tr>
@@ -107,18 +143,66 @@
       <h2 class="sec-label">IPv6 /64 subnets</h2>
       <div class="card tbl-scroll">
         <table class="tbl">
-          <tr><th>Subnet</th><th>First IP</th><th>Gateway</th></tr>
+          <tr><th>Subnet</th><th>First IP</th><th>Gateway</th><th>Netmask</th></tr>
           {{range .IPs.IPv6}}
           <tr>
             <td><strong>{{.Subnet}}</strong> <button class="copy-btn" type="button" data-copy="{{.Subnet}}">copy</button></td>
             <td>{{.FirstIP}}</td>
             <td>{{.GW}}</td>
+            <td>{{.Netmask}}</td>
           </tr>
           {{end}}
         </table>
       </div>
     </section>
     {{end}}
+    <section class="sec">
+      <h2 class="sec-label">IPv6 rDNS</h2>
+      <div class="card tbl-scroll">
+        <form method="post" action="/server/{{.ID}}/rdns6" class="field-row" style="align-items:flex-end;margin-bottom:12px">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <div class="field" style="margin:0"><label for="rdns6-ip">IPv6 address</label>
+            <input type="text" id="rdns6-ip" name="ip" required></div>
+          <div class="field" style="margin:0"><label for="rdns6-rdns">rDNS</label>
+            <input type="text" id="rdns6-rdns" name="rdns" required></div>
+          <button class="btn" type="submit">create entry</button>
+        </form>
+        {{if .IPs.IPv6RDNS}}
+        <table class="tbl">
+          <tr><th>IP</th><th>rDNS</th><th>Note</th><th></th></tr>
+          {{range .IPs.IPv6RDNS}}
+          <tr>
+            <td><strong>{{.IP}}</strong></td>
+            <td>
+              <form method="post" action="/server/{{$.Data.ID}}/rdns6" class="field-row" style="align-items:center;gap:6px;flex-wrap:nowrap">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="ip" value="{{.IP}}">
+                <input type="text" name="rdns" value="{{.RDNS}}" style="min-width:150px">
+                <button class="btn" type="submit">set</button>
+              </form>
+            </td>
+            <td>
+              <form method="post" action="/server/{{$.Data.ID}}/ipnote" class="field-row" style="align-items:center;gap:6px;flex-wrap:nowrap">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="ip" value="{{.IP}}">
+                <input type="hidden" name="v6" value="1">
+                <input type="text" name="note" maxlength="128" value="{{.Note}}" style="min-width:110px">
+                <button class="btn" type="submit">save</button>
+              </form>
+            </td>
+            <td style="text-align:right">
+              <form method="post" action="/server/{{$.Data.ID}}/rdns6/delete" data-confirm="Delete the rDNS entry for {{.IP}}?">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="ip" value="{{.IP}}">
+                <button class="btn btn-danger" type="submit">delete</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </table>
+        {{else}}<p class="mono-sm">No IPv6 rDNS entries.</p>{{end}}
+      </div>
+    </section>
     {{else}}<div class="card"><p class="mono-sm">No IP data available.</p></div>{{end}}
     {{end}}
 
@@ -129,7 +213,7 @@
       <div class="stats">
         <div class="stat"><div class="stat-k">vCores</div><div class="stat-v">{{.Hardware.Cores}}</div></div>
         <div class="stat"><div class="stat-k">Memory</div><div class="stat-v">{{gib .Hardware.Memory}} <small>GiB</small></div></div>
-        <div class="stat"><div class="stat-k">Disk</div><div class="stat-v">{{.Hardware.Disk}} <small>GB</small></div></div>
+        <div class="stat"><div class="stat-k">Disk</div><div class="stat-v">{{gib .Hardware.Disk}} <small>GiB</small></div></div>
         <div class="stat"><div class="stat-k">Uplink</div><div class="stat-v">{{.Hardware.Uplink}} <small>Mbit/s</small></div></div>
       </div>
       <div class="card" style="margin-top:12px">
@@ -137,9 +221,43 @@
           <dt>Hostname</dt><dd><strong>{{.Hardware.Hostname}}</strong></dd>
           <dt>CPU type</dt><dd>{{.Hardware.CPUType}}</dd>
           <dt>Storage</dt><dd>{{.Hardware.StorageType}}</dd>
+          {{if .Hardware.ExtraDisk}}<dt>RAID 1 HDD storage</dt><dd>{{gib .Hardware.ExtraDisk}} GiB</dd>{{end}}
+          {{if .Hardware.Traffic}}<dt>Included traffic</dt><dd>{{printf "%.0f" .Hardware.Traffic}} TB</dd>{{end}}
           <dt>DDoS protection</dt><dd>{{.Hardware.DDoSProtection}}</dd>
           {{if .Info.Product.MAC}}<dt>MAC</dt><dd>{{.Info.Product.MAC}}</dd>{{end}}
+          {{if .Info.Product.Node}}<dt>Host system</dt><dd>{{.Info.Product.Node}}</dd>{{end}}
+          {{if .Info.Product.Location}}<dt>Location</dt><dd>{{.Info.Product.Location}}</dd>{{end}}
+          {{if .Info.Product.ProxmoxID}}<dt>Proxmox ID</dt><dd>{{printf "%.0f" .Info.Product.ProxmoxID}}</dd>{{end}}
+          {{if .Info.Product.ClusterInfo.DisplayName}}<dt>Cluster</dt><dd>{{.Info.Product.ClusterInfo.DisplayName}}</dd>{{end}}
+          <dt>TPM</dt>
+          <dd>
+            {{if .Hardware.TPM}}<span class="chip ok">active</span>{{else}}<span class="chip">not active</span>{{end}}
+            <form method="post" action="/server/{{.ID}}/tpm" style="display:inline-block;margin-left:8px" data-confirm="Change the TPM state of this server?">
+              <input type="hidden" name="csrf" value="{{$.CSRF}}">
+              <input type="hidden" name="enable" value="{{if .Hardware.TPM}}0{{else}}1{{end}}">
+              <button class="btn" type="submit">{{if .Hardware.TPM}}remove{{else}}add{{end}}</button>
+            </form>
+          </dd>
+          <dt>UEFI</dt>
+          <dd>
+            {{if .Hardware.UEFI}}<span class="chip ok">active</span>{{else}}<span class="chip">not active</span>{{end}}
+            <form method="post" action="/server/{{.ID}}/uefi" style="display:inline-block;margin-left:8px" data-confirm="Change UEFI? A server with UEFI enabled cannot boot without the matching configuration.">
+              <input type="hidden" name="csrf" value="{{$.CSRF}}">
+              <input type="hidden" name="enable" value="{{if .Hardware.UEFI}}0{{else}}1{{end}}">
+              <button class="btn" type="submit">{{if .Hardware.UEFI}}remove{{else}}add{{end}}</button>
+            </form>
+          </dd>
         </dl>
+        <hr class="divider">
+        <form method="post" action="/server/{{.ID}}/uplink" class="field-row" style="align-items:flex-end">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <div class="field" style="margin:0;max-width:160px">
+            <label for="uplink">Uplink (MB/s)</label>
+            <input type="number" id="uplink" name="uplink" min="1" {{if .MaxUplinkMB}}max="{{.MaxUplinkMB}}"{{end}} value="{{if .UplinkMB}}{{.UplinkMB}}{{end}}" required>
+          </div>
+          <button class="btn" type="submit">change uplink</button>
+          {{if .MaxUplinkMB}}<span class="mono-sm">maximum {{.MaxUplinkMB}} MB/s</span>{{end}}
+        </form>
       </div>
     </section>
     {{else}}<div class="card"><p class="mono-sm">No hardware data available.</p></div>{{end}}
@@ -153,8 +271,19 @@
         <div class="stat"><div class="stat-k">Memory used</div><div class="stat-v" data-live="mem">—</div></div>
         <div class="stat"><div class="stat-k">Net in</div><div class="stat-v" data-live="netin">—</div></div>
         <div class="stat"><div class="stat-k">Net out</div><div class="stat-v" data-live="netout">—</div></div>
+        <div class="stat" data-node hidden><div class="stat-k">Node CPU</div><div class="stat-v" data-live="nodecpu">—</div></div>
       </div>
-      <p class="mono-sm" style="margin-top:10px">Refreshes every 60 seconds (API rate limit).</p>
+      <div class="card" style="margin-top:12px">
+        <h3 class="sec-label">CPU %</h3>
+        <canvas class="live-chart" data-chart="cpu"></canvas>
+        <h3 class="sec-label" style="margin-top:14px">Memory</h3>
+        <canvas class="live-chart" data-chart="mem"></canvas>
+        <h3 class="sec-label" style="margin-top:14px">Network — <span style="color:var(--green)">in</span> / <span style="color:var(--fg-2)">out</span></h3>
+        <canvas class="live-chart" data-chart="net"></canvas>
+        <h3 class="sec-label" style="margin-top:14px" data-node hidden>Node CPU %</h3>
+        <canvas class="live-chart" data-chart="nodecpu" data-node hidden></canvas>
+      </div>
+      <p class="mono-sm" style="margin-top:10px">One data point every 60 seconds (API rate limit) — the graphs build up while this tab stays open.</p>
     </section>
     {{end}}
 
@@ -169,6 +298,44 @@
         <div class="meter"><div class="meter-fill {{if gt .Traffic.NormalPercentage 80.0}}hot{{end}}" style="width:{{pctCap .Traffic.NormalPercentage}}%"></div></div>
       </div>
     </section>
+    <section class="sec">
+      <h2 class="sec-label">Traffic notifications</h2>
+      <div class="card">
+        <p class="mono-sm" style="margin-bottom:10px">Email notification for each TB of traffic used:
+          {{if eq .Info.Product.TrafficNotify 1.0}}<span class="chip ok">enabled</span>{{else}}<span class="chip">disabled</span>{{end}}</p>
+        <form method="post" action="/server/{{.ID}}/trafficnotify">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="status" value="{{if eq .Info.Product.TrafficNotify 1.0}}0{{else}}1{{end}}">
+          <button class="btn" type="submit">{{if eq .Info.Product.TrafficNotify 1.0}}disable{{else}}enable{{end}}</button>
+        </form>
+      </div>
+    </section>
+    {{if .Traffic.History.Last30Days}}
+    <section class="sec">
+      <h2 class="sec-label">Last 30 days</h2>
+      <div class="card">
+        <div class="bars">
+          {{range .Traffic.History.Last30Days}}
+          <div title="{{.Date}} — in {{gb .In}} GB · out {{gb .Out}} GB"><i class="in" style="height:{{.InPct}}%"></i><i class="out" style="height:{{.OutPct}}%"></i></div>
+          {{end}}
+        </div>
+        <p class="mono-sm" style="margin-top:8px"><span style="color:var(--green)">■</span> in · <span style="color:var(--fg-3)">■</span> out — hover a bar for exact values</p>
+      </div>
+    </section>
+    {{end}}
+    {{if .Traffic.History.Months}}
+    <section class="sec">
+      <h2 class="sec-label">Month view</h2>
+      <div class="card">
+        <div class="bars">
+          {{range .Traffic.History.Months}}
+          <div title="{{.Date}} — in {{gb .In}} GB · out {{gb .Out}} GB"><i class="in" style="height:{{.InPct}}%"></i><i class="out" style="height:{{.OutPct}}%"></i></div>
+          {{end}}
+        </div>
+        <p class="mono-sm" style="margin-top:8px"><span style="color:var(--green)">■</span> in · <span style="color:var(--fg-3)">■</span> out — hover a bar for exact values</p>
+      </div>
+    </section>
+    {{end}}
     {{else}}<div class="card"><p class="mono-sm">No traffic data available.</p></div>{{end}}
     {{end}}
 
@@ -179,13 +346,27 @@
         {{if .Backups}}
         <div class="tbl-scroll">
         <table class="tbl">
-          <tr><th>Name</th><th>Created</th><th></th></tr>
+          <tr><th>Name</th><th>Status</th><th>Created</th><th></th></tr>
           {{range .Backups}}
           <tr>
-            <td><strong>{{if .DisplayName}}{{.DisplayName}}{{else}}{{.BackupName}}{{end}}</strong></td>
+            <td>
+              <form method="post" action="/server/{{$.Data.ID}}/backup/rename" class="field-row" style="align-items:center;gap:6px;flex-wrap:nowrap">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="backup" value="{{.ID}}">
+                <input type="text" name="name" maxlength="64" value="{{if .DisplayName}}{{.DisplayName}}{{else}}{{.BackupName}}{{end}}" style="min-width:160px">
+                <button class="btn" type="submit">rename</button>
+              </form>
+            </td>
+            <td>{{if .Locked}}<span class="chip ok">locked</span>{{else}}<span class="chip">not locked</span>{{end}}</td>
             <td>{{.CreatedOn}}</td>
             <td>
-              <div class="btn-row">
+              <div class="btn-row" style="justify-content:flex-end">
+                <form method="post" action="/server/{{$.Data.ID}}/backup/lock" data-confirm="{{if .Locked}}Unlock this backup? Cron jobs may delete it again.{{else}}Lock this backup? Cron jobs will no longer delete it.{{end}}">
+                  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                  <input type="hidden" name="backup" value="{{.ID}}">
+                  <input type="hidden" name="lock" value="{{if .Locked}}0{{else}}1{{end}}">
+                  <button class="btn" type="submit">{{if .Locked}}unlock{{else}}lock{{end}}</button>
+                </form>
                 <form method="post" action="/server/{{$.Data.ID}}/backup/restore" data-confirm="Restore this backup? Current disk state will be overwritten.">
                   <input type="hidden" name="csrf" value="{{$.CSRF}}">
                   <input type="hidden" name="backup" value="{{.ID}}">
@@ -207,6 +388,108 @@
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
           <button class="btn" type="submit">create backup</button>
         </form>
+      </div>
+    </section>
+    {{end}}
+
+    {{if eq .Tab "tasks"}}
+    <section class="sec">
+      <h2 class="sec-label">Create scheduled task</h2>
+      <div class="card">
+        <form method="post" action="/server/{{.ID}}/cron">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <div class="field-row" style="align-items:flex-end">
+            <div class="field" style="margin:0"><label for="cron-name">Name</label>
+              <input type="text" id="cron-name" name="name" maxlength="64" required></div>
+            <div class="field" style="margin:0;max-width:170px"><label for="cron-expr">Cron expression</label>
+              <input type="text" id="cron-expr" name="expression" placeholder="0 4 * * *" required></div>
+            <div class="field" style="margin:0;max-width:150px"><label for="cron-action">Action</label>
+              <select id="cron-action" name="action">
+                <option value="start">start</option>
+                <option value="stop">stop</option>
+                <option value="shutdown">shutdown</option>
+                <option value="reset">reset</option>
+                <option value="backup">backup</option>
+              </select></div>
+            <button class="btn" type="submit">create task</button>
+          </div>
+          <p class="mono-sm" style="margin-top:8px">Format: minute hour day-of-month month day-of-week. Backups above the limit of 4 delete the oldest automatically.</p>
+        </form>
+      </div>
+    </section>
+    <section class="sec">
+      <h2 class="sec-label">Scheduled tasks</h2>
+      <div class="card tbl-scroll">
+        {{if .Cron}}
+        <table class="tbl">
+          <tr><th>Name</th><th>Expression</th><th>Action</th><th>Next execution</th><th></th></tr>
+          {{range .Cron}}
+          <tr>
+            <td colspan="3">
+              <form method="post" action="/server/{{$.Data.ID}}/cron/edit" class="field-row" style="align-items:center;gap:6px;flex-wrap:nowrap">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="cron" value="{{.ID}}">
+                <input type="text" name="name" maxlength="64" value="{{.DisplayName}}" style="min-width:130px">
+                <input type="text" name="expression" value="{{.Expression}}" style="min-width:120px">
+                <select name="action" style="min-width:110px">
+                  {{$cur := .Action}}
+                  {{range $a := list "start" "stop" "shutdown" "reset" "backup"}}
+                  <option value="{{$a}}" {{if eq $a $cur}}selected{{end}}>{{$a}}</option>
+                  {{end}}
+                </select>
+                <button class="btn" type="submit">save</button>
+              </form>
+            </td>
+            <td>{{.NextExecute}}</td>
+            <td style="text-align:right">
+              <form method="post" action="/server/{{$.Data.ID}}/cron/delete" data-confirm="Delete the scheduled task {{.DisplayName}}?">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="cron" value="{{.ID}}">
+                <button class="btn btn-danger" type="submit">delete</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </table>
+        {{else}}<p class="mono-sm">No scheduled tasks — we recommend creating a backup task.</p>{{end}}
+      </div>
+    </section>
+    {{end}}
+
+    {{if eq .Tab "ddos"}}
+    <section class="sec">
+      <h2 class="sec-label">DDoS notification</h2>
+      <div class="card">
+        <p class="mono-sm" style="margin-bottom:10px">Email notification for each detected attack:
+          {{if .Info.Service.AttackNotify}}<span class="chip ok">enabled</span>{{else}}<span class="chip">disabled</span>{{end}}</p>
+        <form method="post" action="/server/{{.ID}}/attacknotify">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="status" value="{{if .Info.Service.AttackNotify}}0{{else}}1{{end}}">
+          <button class="btn" type="submit">{{if .Info.Service.AttackNotify}}disable{{else}}enable{{end}}</button>
+        </form>
+      </div>
+    </section>
+    <section class="sec">
+      <h2 class="sec-label">DDoS log</h2>
+      <div class="card tbl-scroll">
+        <form method="get" action="/server/{{.ID}}" class="field-row" style="align-items:center;gap:6px;margin-bottom:12px">
+          <input type="hidden" name="tab" value="ddos">
+          <input type="text" name="q" maxlength="64" value="{{.Search}}" placeholder="search by target IP or method" style="max-width:320px">
+          <button class="btn" type="submit">search</button>
+        </form>
+        {{if and .Incidents .Incidents.Data}}
+        <table class="tbl">
+          <tr><th>Target IP</th><th>Method</th><th>Date</th></tr>
+          {{range .Incidents.Data}}
+          <tr><td><strong>{{.IP}}</strong></td><td>{{.Method}}</td><td>{{fmtUnixTime .CreatedOn}}</td></tr>
+          {{end}}
+        </table>
+        <div class="btn-row" style="margin-top:12px;align-items:center">
+          {{if .IncHasPrev}}<a class="btn" href="/server/{{.ID}}?tab=ddos&start={{.IncPrev}}&q={{.Search}}">previous</a>{{end}}
+          {{if .IncHasNext}}<a class="btn" href="/server/{{.ID}}?tab=ddos&start={{.IncNext}}&q={{.Search}}">next</a>{{end}}
+          <span class="mono-sm">showing {{.IncFrom}}–{{.IncTo}} of {{.Incidents.PageInfo.Total}}</span>
+        </div>
+        {{else}}<p class="mono-sm">No incidents recorded.</p>{{end}}
       </div>
     </section>
     {{end}}
@@ -246,9 +529,87 @@
               <button class="btn" type="submit">save</button>
             </div>
           </form>
+          <form method="post" action="/server/{{.ID}}/hostname" class="field" data-confirm="Reset the hostname to its generated default?">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <input type="hidden" name="reset" value="1">
+            <label>&nbsp;</label>
+            <button class="btn" type="submit">reset hostname</button>
+          </form>
         </div>
       </div>
     </section>
+    {{if .Info.Display.ISOMount}}
+    <section class="sec">
+      <h2 class="sec-label">ISO</h2>
+      <div class="card">
+        <p class="flash" style="margin-bottom:12px">ISO support is limited — once an ISO is loaded, Datalix support ends.</p>
+        {{if .Info.Product.ISO}}
+        <form method="post" action="/server/{{.ID}}/iso/remove" data-confirm="Remove the ISO? This stops your server.">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <button class="btn btn-danger" type="submit">remove ISO</button>
+        </form>
+        {{else if .ISOList}}
+        <form method="post" action="/server/{{.ID}}/iso/mount" class="field-row" style="align-items:flex-end"
+              data-confirm="Insert the ISO? This stops your server; start it manually afterwards.">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <div class="field" style="margin:0;max-width:300px">
+            <label for="std-iso">ISO image</label>
+            <select id="std-iso" name="iso">
+              {{range .ISOList}}<option value="{{.ID}}">{{.DisplayName}}</option>{{end}}
+            </select>
+          </div>
+          <button class="btn" type="submit">insert ISO</button>
+        </form>
+        {{else}}<p class="mono-sm">No ISO images available.</p>{{end}}
+      </div>
+    </section>
+    {{end}}
+    {{if .Info.Display.CustomISO}}
+    <section class="sec">
+      <h2 class="sec-label">Custom ISO</h2>
+      <div class="card tbl-scroll">
+        <form method="post" action="/server/{{.ID}}/iso/custom" class="field-row" style="align-items:flex-end;margin-bottom:12px">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <div class="field" style="margin:0;min-width:280px"><label for="isourl">Direct download link (.iso)</label>
+            <input type="text" id="isourl" name="url" maxlength="512" placeholder="https://example.com/image.iso" required></div>
+          <button class="btn" type="submit">download ISO</button>
+        </form>
+        <p class="mono-sm" style="margin-bottom:12px">Up to 2 custom ISOs, max 10 GB each, publicly reachable direct links only. Custom ISOs are deleted automatically after 7 days.</p>
+        {{if .CustomISOs}}
+        <table class="tbl">
+          <tr><th>Name</th><th>Status</th><th></th></tr>
+          {{range .CustomISOs}}
+          <tr>
+            <td><strong>{{.Name}}</strong></td>
+            <td>
+              {{if eq .Status 0.0}}<span class="chip warn">downloading{{if .Percentage}} — {{.Percentage}}%{{end}}</span>
+              {{else if eq .Status 1.0}}<span class="chip ok">ready</span>
+              {{else if eq .Status 3.0}}<span class="chip ok">mounted</span>
+              {{else}}<span class="chip err">download failed</span>{{end}}
+            </td>
+            <td style="text-align:right">
+              <div class="btn-row" style="justify-content:flex-end">
+                {{if or (eq .Status 1.0) (eq .Status 3.0)}}
+                <form method="post" action="/server/{{$.Data.ID}}/iso/custom/mount" data-confirm="{{if eq .Status 3.0}}Unmount this ISO?{{else}}Mount this ISO? The server has to be started manually afterwards.{{end}}">
+                  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                  <input type="hidden" name="iso" value="{{.ID}}">
+                  <button class="btn" type="submit">{{if eq .Status 3.0}}unmount{{else}}mount{{end}}</button>
+                </form>
+                {{end}}
+                <form method="post" action="/server/{{$.Data.ID}}/iso/custom/delete" data-confirm="Delete this custom ISO?">
+                  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                  <input type="hidden" name="iso" value="{{.ID}}">
+                  <button class="btn btn-danger" type="submit">delete</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {{end}}
+        </table>
+        {{else}}<p class="mono-sm">No custom ISOs.</p>{{end}}
+      </div>
+    </section>
+    {{end}}
     {{end}}
 
     {{if eq .Tab "billing"}}
@@ -281,18 +642,49 @@
         </div>
         <hr class="divider">
         <h3 class="sec-label" style="margin-bottom:10px">Auto-renew via credit</h3>
+        <p class="mono-sm" style="margin-bottom:10px">Status:
+          {{if .Info.Service.AutoRenew}}<span class="chip ok">active</span>{{else}}<span class="chip">inactive</span>{{end}}
+          — renews 7 days before expiry when your credit is sufficient.</p>
         <div class="btn-row">
-          <form method="post" action="/server/{{.ID}}/autorenew">
-            <input type="hidden" name="csrf" value="{{$.CSRF}}">
-            <input type="hidden" name="enable" value="1">
-            <button class="btn" type="submit">enable</button>
-          </form>
+          {{if .Info.Service.AutoRenew}}
           <form method="post" action="/server/{{.ID}}/autorenew">
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
             <input type="hidden" name="enable" value="0">
             <button class="btn btn-danger" type="submit">disable</button>
           </form>
+          {{else}}
+          <form method="post" action="/server/{{.ID}}/autorenew">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <input type="hidden" name="enable" value="1">
+            <button class="btn" type="submit">enable</button>
+          </form>
+          {{end}}
         </div>
+        <hr class="divider">
+        <h3 class="sec-label" style="margin-bottom:10px">Auto-renew via PayPal / credit card</h3>
+        <p class="mono-sm" style="margin-bottom:10px">Status:
+          {{if and .Info.Service.AutoRenewPayment (ne .Info.Service.AutoRenewPayment "0")}}<span class="chip ok">active ({{.Info.Service.AutoRenewPayment}})</span>{{else}}<span class="chip">inactive</span>{{end}}
+          — activating forwards you to the provider to authorize the automatic payment; nothing is charged during setup.</p>
+        {{if and .Info.Service.AutoRenewPayment (ne .Info.Service.AutoRenewPayment "0")}}
+        <form method="post" action="/server/{{.ID}}/autorenew/payment">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="enable" value="0">
+          <button class="btn btn-danger" type="submit">disable</button>
+        </form>
+        {{else}}
+        <form method="post" action="/server/{{.ID}}/autorenew/payment" class="field-row" style="align-items:flex-end">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="enable" value="1">
+          <div class="field" style="margin:0;max-width:180px">
+            <label for="ar-method">Payment method</label>
+            <select id="ar-method" name="paymentmethod">
+              <option value="paypal">PayPal</option>
+              <option value="creditcard">CreditCard</option>
+            </select>
+          </div>
+          <button class="btn" type="submit">activate</button>
+        </form>
+        {{end}}
       </div>
     </section>
     {{end}}
@@ -325,6 +717,10 @@
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
             <button class="btn btn-danger" type="submit">rescue mode</button>
           </form>
+          <form method="post" action="/server/{{.ID}}/iso/remove" data-confirm="Eject the ISO / disable rescue? This stops the server.">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <button class="btn btn-danger" type="submit">eject ISO / disable rescue</button>
+          </form>
         </div>
       </div>
     </section>
@@ -332,5 +728,19 @@
 
   </div>
 </div>
+
+{{if .Info.Display.NoVNC}}
+<dialog id="novnc-modal" class="modal modal-sm">
+  <div class="modal-head">
+    <h2 class="modal-title">noVNC console</h2>
+  </div>
+  <p class="notice-warn">This redirects to the official Datalix panel — you need to be logged in at datalix.de, then it connects straight to the noVNC console of this server.</p>
+  <div class="btn-row" style="justify-content:flex-end">
+    <button class="btn" type="button" data-close>close</button>
+    <a class="btn btn-primary" data-close target="_blank" rel="noopener noreferrer"
+       href="https://datalix.de/cp/service/{{.ID}}?noVNC=1&autoconnect=1&host=novnc.datalix.de&port=443&encrypt=1">ok — open console</a>
+  </div>
+</dialog>
+{{end}}
 {{end}}
 {{end}}

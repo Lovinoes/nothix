@@ -1,0 +1,110 @@
+{{define "content"}}
+<div class="page-head">
+  <h1 class="page-title">Top up credit</h1>
+  <span class="page-sub">Accounting · Top up your account with credit</span>
+</div>
+
+{{with .Data}}
+<section class="sec">
+  <h2 class="sec-label">Payment method</h2>
+  <div class="pay-grid">
+    {{range .Methods}}
+    <button class="pay-card" type="button" data-method="{{.ID}}" data-name="{{.Name}}" data-crypto="{{if .Crypto}}1{{else}}0{{end}}" data-logo="/static/payment/{{.Logo}}">
+      <img class="pay-logo" src="/static/payment/{{.Logo}}" alt="" loading="lazy">
+      <strong>{{.Name}}</strong>
+      <small>{{if .Crypto}}crypto{{else}}fiat{{end}}</small>
+    </button>
+    {{end}}
+  </div>
+</section>
+
+<dialog id="pay-modal" class="modal"{{if .Open}} data-open="{{.Open}}"{{end}}>
+  <div class="modal-head">
+    <h2 class="modal-title">Top up credit · <span id="pay-name"></span></h2>
+    <img class="pay-logo" id="pay-modal-logo" style="margin-bottom:0" alt="">
+  </div>
+
+  <p class="flash" id="pay-crypto-note" hidden>Crypto payments can take 10–20 minutes to be confirmed
+    (after blockchain confirmation). The process is automated — please only open a ticket if it has
+    been over an hour.</p>
+
+  <form method="post" action="/credit/topup" id="topup-form">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="method" class="pay-method-input">
+    <div class="field" style="max-width:200px">
+      <label for="pay-amount">Amount (EUR)</label>
+      <input type="number" id="pay-amount" name="amount" min="1" max="100000" step="0.01" value="10" required>
+    </div>
+    <p class="mono-sm">Amount in Euro: <strong id="pay-euro">10.00</strong> € ·
+      Included tax: <strong id="pay-tax">—</strong> € (<span id="pay-vat">—</span> %)</p>
+  </form>
+
+  <h3 class="sec-label" style="margin-top:18px">Invoice data</h3>
+  <form method="post" action="/credit/invoicedata" id="pay-invoice-form">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <input type="hidden" name="method" class="pay-method-input">
+    <div class="field"><label for="pay-company">Company (optional — a company name registers your account as B2B)</label>
+      <input type="text" id="pay-company" name="company" maxlength="128" value="{{if .InvoiceData}}{{.InvoiceData.Company}}{{end}}"></div>
+    <div class="field-row">
+      <div class="field"><label for="pay-firstname">First name</label>
+        <input type="text" id="pay-firstname" name="firstname" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.FirstName}}{{end}}"></div>
+      <div class="field"><label for="pay-lastname">Last name</label>
+        <input type="text" id="pay-lastname" name="lastname" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.LastName}}{{end}}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label for="pay-street">Street and house number</label>
+        <input type="text" id="pay-street" name="street" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.Street}}{{end}}"></div>
+      <div class="field" style="max-width:140px"><label for="pay-zip">ZIP</label>
+        <input type="text" id="pay-zip" name="zip" maxlength="16" required value="{{if .InvoiceData}}{{.InvoiceData.Zip}}{{end}}"></div>
+      <div class="field"><label for="pay-city">City</label>
+        <input type="text" id="pay-city" name="city" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.City}}{{end}}"></div>
+    </div>
+    <div class="field" style="max-width:300px"><label for="pay-country">Tax country</label>
+      <select id="pay-country" name="country">
+        {{$cur := ""}}{{if .InvoiceData}}{{$cur = .InvoiceData.Country}}{{end}}
+        {{range .Countries}}
+        <option value="{{.ID}}" data-vat="{{printf "%g" .VatAmount}}" data-ewr="{{printf "%.0f" .Ewr}}" {{if eq .ID $cur}}selected{{end}}>{{.DisplayName}} — {{printf "%g" .VatAmount}}%</option>
+        {{end}}
+      </select>
+    </div>
+    <p class="mono-sm">Address details are stored for tax purposes. Incorrect information may result in
+      the order being canceled — you are responsible for its correctness.</p>
+    <button class="btn" type="submit">save invoice data</button>
+  </form>
+
+  <hr class="divider">
+
+  <div class="check" style="align-items:flex-start">
+    <input type="checkbox" id="pay-tos" name="tos" value="1" form="topup-form" required>
+    <label for="pay-tos">I accept the <a href="https://datalix.de/tos" target="_blank" rel="noopener" style="text-decoration:underline">General terms and conditions</a>
+      and agree that my hosting service will be continued by Datalix GmbH. Price, term, and scope of
+      services remain unchanged. I will be notified of the transition in advance in text form.</label>
+  </div>
+  <div class="check">
+    <input type="checkbox" id="pay-privacy" name="privacy" value="1" form="topup-form" required>
+    <label for="pay-privacy">I acknowledge the <a href="https://datalix.eu/privacypolicy" target="_blank" rel="noopener" style="text-decoration:underline">privacy policy</a>.</label>
+  </div>
+  <div class="check" style="align-items:flex-start">
+    <input type="checkbox" id="pay-norefund" name="norefund" value="1" form="topup-form" required>
+    <label for="pay-norefund">
+      <span id="norefund-eea">Your account credit can be used only with Datalix and is not transferable.
+        Unused credit that you topped up yourself will be refunded to you on request at any time, to your
+        original payment source (for PaySafeCard, by SEPA transfer to an account in your name; for
+        cryptocurrency, to your original wallet at the current exchange value). Bonus and promotional
+        credit is excluded from refunds. Your credit does not expire; claims for payout become time-barred
+        under the statutory periods (regularly three years). Details are set out in our GTC (Section 5).</span>
+      <span id="norefund-noneea" hidden>Your account credit can be used only with Datalix and is not
+        transferable. Topped-up credit is non-refundable, unless we are unable to provide an ordered
+        service or mandatory statutory provisions require a refund. Where a refund is made, it is made
+        exclusively to your original payment source (for cryptocurrency, to your original wallet).
+        Details are set out in our GTC (Sections 5 and 12).</span>
+    </label>
+  </div>
+
+  <div class="btn-row" style="justify-content:flex-end;margin-top:16px">
+    <button class="btn" type="button" data-close>close</button>
+    <button class="btn btn-primary" type="submit" form="topup-form">top up</button>
+  </div>
+</dialog>
+{{end}}
+{{end}}

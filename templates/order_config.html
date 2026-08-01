@@ -1,0 +1,61 @@
+{{define "content"}}
+<div class="page-head">
+  <h1 class="page-title">Order — {{.Data.Packet.DisplayName}}</h1>
+  <span class="page-sub">{{if .Data.Packet.Line}}{{.Data.Packet.Line}} · {{end}}KVM server</span>
+</div>
+
+{{with .Data}}
+<section class="sec">
+  <h2 class="sec-label">Package</h2>
+  <div class="stats">
+    <div class="stat"><div class="stat-k">vCores</div><div class="stat-v">{{.Packet.Cores}}</div></div>
+    <div class="stat"><div class="stat-k">Memory</div><div class="stat-v">{{gib .Packet.Memory}} <small>GiB</small></div></div>
+    <div class="stat"><div class="stat-k">Disk</div><div class="stat-v">{{gib .Packet.Disk}} <small>GiB</small></div></div>
+    <div class="stat"><div class="stat-k">Price</div><div class="stat-v">{{printf "%.2f" .Packet.Price}} <small>EUR/mo</small></div></div>
+  </div>
+</section>
+
+<section class="sec">
+  <h2 class="sec-label">Configuration</h2>
+  <div class="card">
+    <form method="post" action="/order/{{.Packet.ID}}">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <div class="field-row">
+        <div class="field" style="max-width:300px">
+          <label for="ord-os">Operating system</label>
+          <select id="ord-os" name="os" required>
+            {{range .OSList}}<option value="{{.ID}}">{{.DisplayName}}</option>{{end}}
+          </select>
+        </div>
+        <div class="field" style="max-width:140px">
+          <label for="ord-ipcount">IPv4 addresses</label>
+          <input type="number" id="ord-ipcount" name="ipcount" min="0" max="{{if .Packet.IPv4}}{{.Packet.IPv4}}{{else}}1{{end}}" value="1" required>
+        </div>
+        <div class="field" style="max-width:220px">
+          <label for="ord-method">Payment method</label>
+          <select id="ord-method" name="paymentmethod">
+            {{range .PayOptions}}<option value="{{.Method}}">{{.Display}}</option>{{end}}
+          </select>
+        </div>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="ord-credit" name="credit" value="1" checked>
+        <label for="ord-credit">use my credit balance first</label>
+      </div>
+      <div class="check" style="align-items:flex-start">
+        <input type="checkbox" id="ord-tos" name="tos" value="1" required>
+        <label for="ord-tos">I accept the <a href="https://datalix.de/tos" target="_blank" rel="noopener" style="text-decoration:underline">General terms and conditions</a>.</label>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="ord-privacy" name="privacy" value="1" required>
+        <label for="ord-privacy">I acknowledge the <a href="https://datalix.eu/privacypolicy" target="_blank" rel="noopener" style="text-decoration:underline">privacy policy</a>.</label>
+      </div>
+      <div class="btn-row" style="margin-top:14px">
+        <a class="btn" href="/order">back</a>
+        <button class="btn btn-primary" type="submit">order now</button>
+      </div>
+    </form>
+  </div>
+</section>
+{{end}}
+{{end}}

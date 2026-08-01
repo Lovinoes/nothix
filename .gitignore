@@ -1,4 +1,2 @@
-panel.exe
+*.exe*
 panel
-*.exe~
-datalix-panel.exe

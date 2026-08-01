@@ -1,0 +1,38 @@
+{{define "content"}}
+<div class="page-head">
+  <h1 class="page-title">Orders</h1>
+  <span class="page-sub">Accounting · Check the status of your orders</span>
+</div>
+
+{{with .Data}}
+<div class="card tbl-scroll">
+  {{if .Rows}}
+  <table class="tbl">
+    <tr><th>#</th><th>Status</th><th>Type</th><th>Info</th><th>Date</th></tr>
+    {{range .Rows}}
+    <tr>
+      <td class="mono-sm">{{printf "%.0f" .ID}}</td>
+      <td>
+        <span class="chip {{.StatusClass}}">{{.StatusText}}</span>
+        {{if and (eq .StatusClass "err") .DisplayForClient}}<div class="mono-sm" style="margin-top:6px">{{.DisplayForClient}}</div>{{end}}
+      </td>
+      <td><span class="chip">{{.TypeText}}</span></td>
+      <td>{{.OrderInfo}}</td>
+      <td>{{fmtUnixTime .CreatedOn}}</td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="mono-sm">No orders.</p>
+  {{end}}
+</div>
+
+{{if or .HasPrev .HasNext}}
+<div class="btn-row" style="margin-top:14px;align-items:center">
+  {{if .HasPrev}}<a class="btn" href="/orders?start={{.PrevStart}}">← previous</a>{{end}}
+  <span class="mono-sm">showing {{.From}}–{{.To}} of {{.Total}}</span>
+  {{if .HasNext}}<a class="btn" href="/orders?start={{.NextStart}}">next →</a>{{end}}
+</div>
+{{end}}
+{{end}}
+{{end}}

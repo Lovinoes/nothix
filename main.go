@@ -7,7 +7,6 @@ package main
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
 	"encoding/base64"
@@ -151,8 +150,7 @@ var (
 )
 
 func cached(token, key string, ttl time.Duration, fill func() ([]byte, error)) ([]byte, error) {
-	h := sha256.Sum256([]byte(token + "|" + key))
-	k := hex.EncodeToString(h[:])
+	k := token + "|" + key
 	cacheMu.Lock()
 	if e, ok := cache[k]; ok && time.Now().Before(e.exp) {
 		cacheMu.Unlock()
@@ -184,6 +182,7 @@ var tmplFuncs = template.FuncMap{
 		return time.Unix(ts, 0).UTC().Format("02.01.2006")
 	},
 	"gib":   func(mb int) string { return fmt.Sprintf("%g", float64(mb)/1024) },
+	"gb":    func(mb Num) string { return fmt.Sprintf("%.2f", float64(mb)/1024) },
 	"isKVM": isKVM,
 	"daysLeft": func(ts int64) string {
 		if ts <= 0 {
@@ -242,7 +241,7 @@ var (
 )
 
 func initTemplates() {
-	for _, p := range []string{"overview", "services", "server", "account", "support", "settings", "tickets", "ticket_new"} {
+	for _, p := range []string{"overview", "services", "server", "account", "support", "settings", "tickets", "ticket_new", "orders", "transactions", "donations", "affiliate", "credit", "paybyinvoice", "order", "order_config", "access", "emaillog"} {
 		pages[p] = template.Must(template.New("base.html").Funcs(tmplFuncs).
 			ParseFS(assets, "templates/base.html", "templates/"+p+".html"))
 	}
@@ -275,7 +274,10 @@ func secureHeaders(next http.Handler) http.Handler {
 		h.Set("Content-Security-Policy",
 			"default-src 'none'; style-src 'self' 'unsafe-inline'; script-src 'self'; "+
 				"font-src 'self'; img-src 'self' data:; connect-src 'self'; "+
-				"form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+				// form-action allows https: because the top-up POST answers with a
+				// redirect to the payment provider, and some browsers re-check
+				// form-action against redirect targets
+				"form-action 'self' https:; frame-ancestors 'none'; base-uri 'none'")
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
@@ -397,11 +399,38 @@ func newMux() http.Handler {
 	mux.HandleFunc("POST /services/{id}/hide", requireAuth(servicesHide))
 	mux.HandleFunc("GET /server/{id}", requireAuth(serverPage))
 	mux.HandleFunc("GET /account", requireAuth(accountPage))
+	mux.HandleFunc("GET /orders", requireAuth(ordersPage))
+	mux.HandleFunc("GET /transactions", requireAuth(transactionsPage))
+	mux.HandleFunc("GET /invoice/{id}", requireAuth(invoiceView))
+	mux.HandleFunc("GET /donations", requireAuth(donationsPage))
+	mux.HandleFunc("POST /donations/create", requireAuth(donationLinkCreate))
+	mux.HandleFunc("POST /donations/delete", requireAuth(donationLinkDelete))
+	mux.HandleFunc("GET /affiliate", requireAuth(affiliatePage))
+	mux.HandleFunc("POST /affiliate/create", requireAuth(affiliateLinkCreate))
+	mux.HandleFunc("POST /affiliate/delete", requireAuth(affiliateLinkDelete))
+	mux.HandleFunc("GET /credit", requireAuth(creditPage))
+	mux.HandleFunc("POST /credit/topup", requireAuth(creditTopup))
+	mux.HandleFunc("POST /credit/invoicedata", requireAuth(creditInvoiceData))
+	mux.HandleFunc("GET /paybyinvoice", requireAuth(paybyinvoicePage))
+	mux.HandleFunc("POST /paybyinvoice/create", requireAuth(pbiCreate))
+	mux.HandleFunc("POST /paybyinvoice/rename", requireAuth(pbiRename))
+	mux.HandleFunc("POST /paybyinvoice/reassign", requireAuth(pbiReassign))
+	mux.HandleFunc("POST /paybyinvoice/pay", requireAuth(pbiPay))
+	mux.HandleFunc("GET /order", requireAuth(orderPage))
+	mux.HandleFunc("GET /order/{packet}", requireAuth(orderConfigPage))
+	mux.HandleFunc("POST /order/{packet}", requireAuth(orderSubmit))
 	mux.HandleFunc("GET /tickets", requireAuth(ticketsPage))
 	mux.HandleFunc("GET /tickets/new", requireAuth(ticketNewPage))
 	mux.HandleFunc("POST /tickets/new", requireAuth(ticketCreate))
 	mux.HandleFunc("GET /support", requireAuth(supportPage))
 	mux.HandleFunc("GET /settings", requireAuth(settingsPage))
+	mux.HandleFunc("GET /access", requireAuth(accessPage))
+	mux.HandleFunc("POST /access/create", requireAuth(accessCreate))
+	mux.HandleFunc("POST /access/edit", requireAuth(accessEdit))
+	mux.HandleFunc("POST /access/delete", requireAuth(accessAction("", "Access deleted.")))
+	mux.HandleFunc("POST /access/accept", requireAuth(accessAction("accept", "Access request accepted.")))
+	mux.HandleFunc("POST /access/deny", requireAuth(accessAction("deny", "Access request denied.")))
+	mux.HandleFunc("GET /emaillog", requireAuth(emaillogPage))
 
 	// server actions
 	mux.HandleFunc("POST /server/{id}/power", requireAuth(serverPower))
@@ -416,6 +445,26 @@ func newMux() http.Handler {
 	mux.HandleFunc("POST /server/{id}/backup/restore", requireAuth(serverBackupRestore))
 	mux.HandleFunc("POST /server/{id}/extend", requireAuth(serverExtend))
 	mux.HandleFunc("POST /server/{id}/autorenew", requireAuth(serverAutorenew))
+	mux.HandleFunc("POST /server/{id}/autorenew/payment", requireAuth(serverAutorenewPayment))
+	mux.HandleFunc("POST /server/{id}/protstatus", requireAuth(serverProtStatus))
+	mux.HandleFunc("POST /server/{id}/ipnote", requireAuth(serverIPNote))
+	mux.HandleFunc("POST /server/{id}/rdns6", requireAuth(serverRDNS6Set))
+	mux.HandleFunc("POST /server/{id}/rdns6/delete", requireAuth(serverRDNS6Delete))
+	mux.HandleFunc("POST /server/{id}/trafficnotify", requireAuth(serverTrafficNotify))
+	mux.HandleFunc("POST /server/{id}/attacknotify", requireAuth(serverAttackNotify))
+	mux.HandleFunc("POST /server/{id}/tpm", requireAuth(serverFeatureToggle("tpm")))
+	mux.HandleFunc("POST /server/{id}/uefi", requireAuth(serverFeatureToggle("uefi")))
+	mux.HandleFunc("POST /server/{id}/uplink", requireAuth(serverUplink))
+	mux.HandleFunc("POST /server/{id}/backup/rename", requireAuth(serverBackupRename))
+	mux.HandleFunc("POST /server/{id}/backup/lock", requireAuth(serverBackupLock))
+	mux.HandleFunc("POST /server/{id}/cron", requireAuth(serverCronCreate))
+	mux.HandleFunc("POST /server/{id}/cron/edit", requireAuth(serverCronEdit))
+	mux.HandleFunc("POST /server/{id}/cron/delete", requireAuth(serverCronDelete))
+	mux.HandleFunc("POST /server/{id}/iso/mount", requireAuth(serverISOMountStd))
+	mux.HandleFunc("POST /server/{id}/iso/remove", requireAuth(serverISORemove))
+	mux.HandleFunc("POST /server/{id}/iso/custom", requireAuth(serverCustomISOAdd))
+	mux.HandleFunc("POST /server/{id}/iso/custom/mount", requireAuth(serverCustomISOMount))
+	mux.HandleFunc("POST /server/{id}/iso/custom/delete", requireAuth(serverCustomISODelete))
 
 	// account / support / settings actions
 	mux.HandleFunc("POST /account/password", requireAuth(accountPassword))
@@ -447,9 +496,6 @@ func main() {
 	if addr == "" {
 		addr = "127.0.0.1:8480"
 	}
-	if v := os.Getenv("PANEL_API_BASE"); v != "" {
-		apiBase = v // testing/staging override
-	}
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           newMux(),
@@ -460,11 +506,6 @@ func main() {
 		MaxHeaderBytes:    64 << 10,
 	}
 
-	cert, key := os.Getenv("PANEL_TLS_CERT"), os.Getenv("PANEL_TLS_KEY")
-	if cert != "" && key != "" {
-		log.Printf("datalix panel listening on https://%s", addr)
-		log.Fatal(srv.ListenAndServeTLS(cert, key))
-	}
-	log.Printf("datalix panel listening on http://%s (put TLS in front for production)", addr)
+	log.Printf("nothix panel listening on http://%s (put TLS in front for production)", addr)
 	log.Fatal(srv.ListenAndServe())
 }
