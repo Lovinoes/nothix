@@ -1,0 +1,282 @@
+{{define "content"}}
+<div class="page-head">
+  <h1 class="page-title">Settings</h1>
+  <span class="page-sub">Account · Security · Notifications</span>
+</div>
+
+{{with .Data}}
+<div class="tabs">
+  <a href="/settings" {{if eq .Tab "general"}}class="active"{{end}}>General</a>
+  <a href="/settings?tab=sshkeys" {{if eq .Tab "sshkeys"}}class="active"{{end}}>SSH Keys</a>
+  <a href="/settings?tab=notifications" {{if eq .Tab "notifications"}}class="active"{{end}}>Notifications</a>
+  <a href="/settings?tab=sessions" {{if eq .Tab "sessions"}}class="active"{{end}}>Sessions</a>
+</div>
+
+{{if eq .Tab "general"}}
+
+{{if .TwoFA}}
+<section class="sec">
+  <h2 class="sec-label">Finish 2FA setup</h2>
+  <div class="card">
+    <div class="field-row" style="align-items:flex-start">
+      {{if qrURL .TwoFA.QRCode}}
+      <img src="{{qrURL .TwoFA.QRCode}}" alt="2FA QR code" width="180" height="180" style="border:1px solid var(--line);border-radius:4px;background:#fff">
+      {{end}}
+      <div style="flex:1;min-width:240px">
+        <dl class="kv">
+          <dt>Secret</dt>
+          <dd>{{.TwoFA.Secret}} <button class="copy-btn" type="button" data-copy="{{.TwoFA.Secret}}">copy</button></dd>
+          {{if .TwoFA.BackupCodes}}
+          <dt>Backup codes</dt>
+          <dd>{{range .TwoFA.BackupCodes}}{{.}} {{end}}</dd>
+          {{end}}
+        </dl>
+        <p class="mono-sm" style="margin:10px 0">Save the backup codes now — they are shown only once.</p>
+        <form method="post" action="/settings/twofa/finish">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <div class="field-row" style="gap:6px;align-items:flex-end">
+            <div class="field" style="margin:0">
+              <label for="code">2FA code</label>
+              <input type="text" id="code" name="code" maxlength="16" autocomplete="one-time-code" required style="width:140px">
+            </div>
+            <button class="btn btn-primary" type="submit">activate</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</section>
+{{end}}
+
+<section class="sec">
+  <h2 class="sec-label">Account data</h2>
+  <div class="card">
+    <form method="post" action="/settings/account">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <div class="field" style="max-width:240px">
+        <label for="lang">Language</label>
+        <select id="lang" name="lang">
+          <option value="en" {{if eq .Lang "en"}}selected{{end}}>English</option>
+          <option value="de" {{if eq .Lang "de"}}selected{{end}}>German</option>
+        </select>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="ipcheck" name="ipcheck" value="1" {{if .IPCheck}}checked{{end}}>
+        <label for="ipcheck">Bind official-panel sessions to their IP address</label>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="permsessions" name="permsessions" value="1" {{if .PermSession}}checked{{end}}>
+        <label for="permsessions">Permanent sessions (no auto-logout after 10 days)</label>
+      </div>
+      <button class="btn" type="submit">save</button>
+    </form>
+    <hr class="divider">
+    <h3 class="sec-label" style="margin-bottom:10px">Two-factor authentication</h3>
+    <div class="btn-row">
+      {{if .TwoFAActive}}
+      <span class="chip ok">2FA active</span>
+      <form method="post" action="/settings/twofa/remove" data-confirm="Remove 2FA from your account? This cannot be undone.">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <button class="btn btn-danger" type="submit">remove 2FA</button>
+      </form>
+      {{else}}
+      <span class="chip warn">2FA not enabled</span>
+      <form method="post" action="/settings/twofa/init">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <button class="btn btn-primary" type="submit">enable 2FA</button>
+      </form>
+      {{end}}
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <h2 class="sec-label">Change password</h2>
+  <div class="card">
+    <form method="post" action="/account/password">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <div class="field-row">
+        <div class="field">
+          <label for="oldpassword">Current password</label>
+          <input type="password" id="oldpassword" name="oldpassword" autocomplete="current-password" required>
+        </div>
+        <div class="field">
+          <label for="newpassword">New password</label>
+          <input type="password" id="newpassword" name="newpassword" autocomplete="new-password" minlength="8" required>
+        </div>
+      </div>
+      <button class="btn" type="submit">change password</button>
+    </form>
+  </div>
+</section>
+
+<section class="sec">
+  <h2 class="sec-label">Invoice data</h2>
+  <div class="card">
+    <form method="post" action="/settings/invoicedata">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <div class="field-row">
+        <div class="field"><label for="firstname">First name</label>
+          <input type="text" id="firstname" name="firstname" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.FirstName}}{{end}}"></div>
+        <div class="field"><label for="lastname">Last name</label>
+          <input type="text" id="lastname" name="lastname" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.LastName}}{{end}}"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="street">Street and house number</label>
+          <input type="text" id="street" name="street" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.Street}}{{end}}"></div>
+        <div class="field" style="max-width:140px"><label for="zip">ZIP</label>
+          <input type="text" id="zip" name="zip" maxlength="16" required value="{{if .InvoiceData}}{{.InvoiceData.Zip}}{{end}}"></div>
+        <div class="field"><label for="city">City</label>
+          <input type="text" id="city" name="city" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.City}}{{end}}"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label for="country">Tax country</label>
+          <select id="country" name="country">
+            {{$cur := ""}}{{if .InvoiceData}}{{$cur = .InvoiceData.Country}}{{end}}
+            {{range .Countries}}
+            <option value="{{.ID}}" {{if eq .ID $cur}}selected{{end}}>{{.DisplayName}} — {{printf "%.0f" .VatAmount}}%</option>
+            {{end}}
+          </select>
+        </div>
+        <div class="field"><label for="company">Company (optional)</label>
+          <input type="text" id="company" name="company" maxlength="128" value="{{if .InvoiceData}}{{.InvoiceData.Company}}{{end}}"></div>
+      </div>
+      <p class="mono-sm" style="margin-bottom:12px">Address details are stored for tax purposes — you are responsible for their correctness.</p>
+      <button class="btn" type="submit">save invoice data</button>
+    </form>
+  </div>
+</section>
+{{end}}
+
+{{if eq .Tab "sshkeys"}}
+<section class="sec">
+  <h2 class="sec-label">SSH keys</h2>
+  <div class="card">
+    {{if .SSHKeys}}
+    <div class="tbl-scroll">
+    <table class="tbl">
+      <tr><th>Name</th><th>Key</th><th>Added</th><th></th></tr>
+      {{range .SSHKeys}}
+      <tr>
+        <td><strong>{{.DisplayName}}</strong></td>
+        <td class="mono-sm" style="max-width:320px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">{{.Key}}</td>
+        <td>{{.CreatedOn}}</td>
+        <td>
+          <form method="post" action="/account/sshkey/delete" data-confirm="Delete this SSH key? It is not removed from services already using it.">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button class="btn btn-danger" type="submit">delete</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </table>
+    </div>
+    <hr class="divider">
+    {{end}}
+    <form method="post" action="/account/sshkey">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <div class="field-row">
+        <div class="field" style="max-width:200px">
+          <label for="displayname">Name</label>
+          <input type="text" id="displayname" name="displayname" maxlength="64" required>
+        </div>
+        <div class="field">
+          <label for="key">Public key</label>
+          <input type="text" id="key" name="key" placeholder="ssh-ed25519 AAAA… user@host" required>
+        </div>
+      </div>
+      <button class="btn" type="submit">add key</button>
+    </form>
+  </div>
+</section>
+{{end}}
+
+{{if eq .Tab "notifications"}}
+<section class="sec">
+  <h2 class="sec-label">Notifications</h2>
+  <p class="mono-sm" style="margin-bottom:14px">More about POST webhooks in the
+    <a href="https://datalix.eu/wiki/general/postwebhook/" rel="noopener noreferrer" style="text-decoration:underline">wiki</a>.</p>
+  {{if .Notifications}}
+  {{range .Notifications}}
+  <div class="card">
+    <form method="post" action="/settings/notify">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <input type="hidden" name="type" value="{{.Type}}">
+      <p style="font-size:12px;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:12px">{{.DisplayName}}</p>
+      <div class="check">
+        <input type="checkbox" id="email-{{.Type}}" name="email" value="1" {{if .Email}}checked{{end}}>
+        <label for="email-{{.Type}}">Email notifications</label>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="discord-{{.Type}}">Discord webhook URL</label>
+          <input type="url" id="discord-{{.Type}}" name="discord" value="{{.Discord}}" placeholder="https://discord.com/api/webhooks/…">
+        </div>
+        <div class="field">
+          <label for="webhook-{{.Type}}">POST webhook URL</label>
+          <input type="url" id="webhook-{{.Type}}" name="webhook" value="{{.Webhook}}" placeholder="https://example.com/hook">
+        </div>
+      </div>
+      <button class="btn" type="submit">save</button>
+    </form>
+  </div>
+  {{end}}
+  {{else}}
+  <div class="card"><p class="mono-sm">No notification settings available.</p></div>
+  {{end}}
+</section>
+{{end}}
+
+{{if eq .Tab "sessions"}}
+<section class="sec">
+  <h2 class="sec-label">Official panel sessions</h2>
+  <div class="card">
+    {{if .Sessions}}
+    <div class="tbl-scroll">
+    <table class="tbl">
+      <tr><th>Session</th><th>IP</th><th>Created</th><th>Expires</th><th></th></tr>
+      {{range .Sessions}}
+      <tr>
+        <td class="mono-sm">{{.ID}}</td>
+        <td>{{.IP}}</td>
+        <td>{{.CreatedOn}}</td>
+        <td>{{.ExpireAt}}</td>
+        <td>
+          <form method="post" action="/settings/session/delete" data-confirm="Delete this session? The device is logged out of the official panel.">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button class="btn btn-danger" type="submit">delete</button>
+          </form>
+        </td>
+      </tr>
+      {{end}}
+    </table>
+    </div>
+    <hr class="divider">
+    <form method="post" action="/settings/sessions/deleteall" data-confirm="Delete ALL official-panel sessions? Every logged-in device is logged out (your API-key login here is unaffected).">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <button class="btn btn-danger" type="submit">delete all sessions</button>
+    </form>
+    {{else}}<p class="mono-sm">No active official-panel sessions.</p>{{end}}
+  </div>
+</section>
+
+<section class="sec">
+  <h2 class="sec-label">Panel session</h2>
+  <div class="card">
+    <p class="mono-sm" style="margin-bottom:14px">
+      Your API key is held in this panel's server memory only and is dropped on
+      logout or after 12 hours of inactivity. Manage or revoke API keys in the
+      official panel under Account → API.
+    </p>
+    <form method="post" action="/logout">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <button class="btn btn-danger" type="submit">log out &amp; forget key</button>
+    </form>
+  </div>
+</section>
+{{end}}
+
+{{end}}
+{{end}}

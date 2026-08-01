@@ -1,0 +1,47 @@
+{{define "content"}}
+<div class="page-head">
+  <h1 class="page-title">Support</h1>
+  <span class="page-sub">Tickets · Contact</span>
+</div>
+
+{{with .Data}}
+<section class="sec">
+  <h2 class="sec-label">Support PIN</h2>
+  <div class="card">
+    <p class="mono-sm">Give this PIN to Datalix support to verify your identity.</p>
+    <div class="pin-display">{{if .Pin}}{{.Pin}}{{else}}——————{{end}}</div>
+    <form method="post" action="/support/pin" data-confirm="Generate a new support PIN? The old one becomes invalid.">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <button class="btn" type="submit">generate new pin</button>
+    </form>
+  </div>
+</section>
+
+<section class="sec">
+  <h2 class="sec-label">Tickets</h2>
+  <div class="card">
+    <p class="mono-sm" style="margin-bottom:14px">
+      View and create tickets right here. Reading and answering ticket messages
+      opens in the official panel — quote your support PIN.
+    </p>
+    <div class="btn-row">
+      <a class="btn" href="/tickets">ticket overview</a>
+      <a class="btn" href="/tickets/new">create ticket</a>
+      <a class="btn" href="https://discord.gg/3eyWSTqnpz" rel="noopener noreferrer">discord (primary support)</a>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <h2 class="sec-label">Help</h2>
+  <div class="card">
+    <div class="btn-row">
+      <a class="btn" href="https://wiki.datalix.eu/en" rel="noopener noreferrer">wiki</a>
+      <a class="btn" href="https://status.datalix.de/" rel="noopener noreferrer">status page</a>
+      <a class="btn" href="https://lg.datalix.de/" rel="noopener noreferrer">looking glass</a>
+      <a class="btn" href="https://apidoc.datalix.de/" rel="noopener noreferrer">api docs</a>
+    </div>
+  </div>
+</section>
+{{end}}
+{{end}}

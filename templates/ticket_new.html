@@ -1,0 +1,32 @@
+{{define "content"}}
+<div class="page-head">
+  <h1 class="page-title">Create New Ticket</h1>
+  <span class="page-sub">Support · 9:00 – 23:00</span>
+</div>
+
+{{with .Data}}
+<div class="card" style="max-width:720px">
+  <form method="post" action="/tickets/new">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <div class="field">
+      <label for="title">Title</label>
+      <input type="text" id="title" name="title" maxlength="128" required>
+    </div>
+    <div class="field">
+      <label for="service">Service</label>
+      <select id="service" name="service">
+        <option value="none">none</option>
+        {{range .Services}}
+        <option value="{{.ID}}">{{.ProductDisplay}}{{if .Name}} — {{.Name}}{{end}}{{if .IP}} — {{.IP}}{{end}}</option>
+        {{end}}
+      </select>
+    </div>
+    <div class="field">
+      <label for="text">Your message</label>
+      <textarea id="text" name="text" rows="10" maxlength="10000" required placeholder="Describe your issue — include your support PIN for account questions."></textarea>
+    </div>
+    <button class="btn btn-primary" type="submit">Create ticket</button>
+  </form>
+</div>
+{{end}}
+{{end}}

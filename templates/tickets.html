@@ -1,0 +1,43 @@
+{{define "content"}}
+<div class="page-head">
+  <h1 class="page-title">Ticket Overview</h1>
+  <span class="page-sub">Support · Tickets</span>
+  <span style="flex:1"></span>
+  <a class="btn btn-primary" href="/tickets/new">Create ticket</a>
+</div>
+
+{{with .Data}}
+<div class="tabs">
+  <a href="/tickets" {{if not .Closed}}class="active"{{end}}>Open tickets</a>
+  <a href="/tickets?tab=closed" {{if .Closed}}class="active"{{end}}>Closed tickets</a>
+</div>
+
+{{if .Unavailable}}
+<div class="card">
+  <p class="mono-sm">The ticket list could not be loaded — the API rejected the request.
+  Use the <a href="https://datalix.eu/cp/ticket" rel="noopener noreferrer" style="text-decoration:underline">official panel</a> instead.</p>
+</div>
+{{else}}
+<div class="card tbl-scroll">
+  {{if .Tickets}}
+  <table class="tbl">
+    <tr><th>#</th><th>Title</th><th>Status</th><th>Last answer</th><th>Created</th><th></th></tr>
+    {{range .Tickets}}
+    <tr>
+      <td class="mono-sm">{{printf "%.0f" .ID}}</td>
+      <td><strong>{{.Title}}</strong></td>
+      <td><span class="chip {{ticketClass .Status.BGColor}}">{{.Status.Text}}</span></td>
+      <td>{{fmtUnixTime .LastUpdate}}</td>
+      <td>{{fmtUnixTime .CreatedOn}}</td>
+      <td><a class="btn" href="https://datalix.eu/cp/ticket/{{printf "%.0f" .ID}}" rel="noopener noreferrer">details ↗</a></td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="mono-sm">No {{if .Closed}}closed{{else}}open{{end}} tickets.</p>
+  {{end}}
+</div>
+<p class="mono-sm" style="margin-top:10px">Reading and answering ticket messages opens in the official panel.</p>
+{{end}}
+{{end}}
+{{end}}

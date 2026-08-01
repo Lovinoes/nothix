@@ -1,0 +1,69 @@
+{{define "content"}}
+<div class="page-head">
+  <h1 class="page-title">Service Overview</h1>
+  <span class="page-sub">Manage services · live status</span>
+</div>
+
+{{with .Data}}
+<div class="tabs">
+  <a href="/services" {{if not .Deleted}}class="active"{{end}}>Active services</a>
+  <a href="/services?tab=deleted" {{if .Deleted}}class="active"{{end}}>Deleted services</a>
+</div>
+
+{{if not .Deleted}}
+<form method="get" action="/services" class="search-row">
+  <input type="text" name="q" value="{{.Query}}" maxlength="64" placeholder="Search for service ID, name, IP" aria-label="Search services">
+  <button class="btn" type="submit">search</button>
+</form>
+{{end}}
+
+<div class="card tbl-scroll">
+  {{if .Services}}
+  <table class="tbl">
+    <tr><th></th><th>Product</th><th>Service ID</th><th>Duration</th><th>Status</th><th></th></tr>
+    {{range .Services}}
+    <tr {{if and (isKVM .ProductDisplay) (not .DeleteDone)}}data-href="/server/{{.ID}}"{{end}}>
+      <td>
+        <form method="post" action="/services/{{.ID}}/fav">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="on" value="{{if .Fav}}0{{else}}1{{end}}">
+          <button class="fav-btn {{if .Fav}}on{{end}}" type="submit" title="Toggle favorite" aria-label="Toggle favorite">{{if .Fav}}★{{else}}☆{{end}}</button>
+        </form>
+      </td>
+      <td>
+        <strong>{{if .Name}}{{.Name}}{{else}}{{.ProductDisplay}}{{end}}</strong>
+        <div class="mono-sm">{{if .Name}}{{.ProductDisplay}}{{end}}{{if .IP}}{{if .Name}} · {{end}}{{.IP}}{{end}}{{if .Domain}}{{if or .Name .IP}} · {{end}}{{.Domain}}{{end}}</div>
+      </td>
+      <td class="mono-sm">{{.ID}}</td>
+      <td>
+        {{if .DeleteAt}}
+          <span style="color:var(--red)">deletes {{fmtUnix .DeleteAt}}</span>
+        {{else}}
+          <strong>{{daysLeft .ExpireAt}}</strong>
+          <div class="mono-sm">{{fmtUnix .ExpireAt}}</div>
+        {{end}}
+      </td>
+      <td>
+        {{if .DeleteDone}}<span class="status stopped">deleted</span>
+        {{else if .Locked}}<span class="status stopped" title="{{.LockReason}}">locked</span>
+        {{else}}<span class="status pending" data-status-id="{{.ID}}">…</span>{{end}}
+      </td>
+      <td>
+        {{if and (isKVM .ProductDisplay) (not .DeleteDone)}}
+        <a class="btn" href="/server/{{.ID}}">manage</a>
+        {{else if .DeleteDone}}
+        <form method="post" action="/services/{{.ID}}/hide" data-confirm="Hide this deleted service from the list?">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <button class="btn" type="submit">hide</button>
+        </form>
+        {{else}}<span class="mono-sm">official panel</span>{{end}}
+      </td>
+    </tr>
+    {{end}}
+  </table>
+  {{else}}
+  <p class="mono-sm">No services found{{if .Query}} for “{{.Query}}”{{end}}.</p>
+  {{end}}
+</div>
+{{end}}
+{{end}}

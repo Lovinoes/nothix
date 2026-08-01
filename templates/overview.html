@@ -1,0 +1,126 @@
+{{define "content"}}
+{{with .Data}}
+<section class="hero">
+  <div>
+    <h1 class="hero-title">{{.Greeting}}{{if .Username}}, {{.Username}}{{end}}</h1>
+    <div class="hero-chips">
+      <span class="chip">Customer</span>
+      {{if eq .EmailState 1}}
+      <span class="chip ok">Email verified</span>
+      {{else if eq .EmailState 2}}
+      <span class="chip warn">Throwaway email — no mail from Datalix reaches you</span>
+      {{else}}
+      <form method="post" action="/account/verifyemail" class="chip-form">
+        <input type="hidden" name="csrf" value="{{$.CSRF}}">
+        <span class="chip warn">Email not verified</span>
+        <button class="chip-link" type="submit">verify now</button>
+      </form>
+      {{end}}
+      {{if .Dashboard}}{{if .Dashboard.InvoiceData}}
+      <span class="chip ok">Invoice data filed</span>
+      {{else}}
+      <span class="chip warn">Invoice data missing</span>
+      {{end}}{{end}}
+    </div>
+  </div>
+  <div class="hero-actions">
+    <a class="btn" href="/support">Contact support</a>
+    <a class="btn btn-primary" href="https://datalix.eu" rel="noopener noreferrer">Order new product</a>
+  </div>
+</section>
+
+{{if .Dashboard}}
+<section class="sec">
+  <h2 class="sec-label">Overview</h2>
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-k">Credit</div>
+      <div class="stat-v">{{printf "%.2f" .Dashboard.Credit}} <small>EUR</small></div>
+      <div class="stat-foot">
+        <form method="post" action="/account/redeem" class="redeem-row">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="text" name="code" placeholder="discount code" aria-label="Discount code" required>
+          <button class="btn" type="submit">redeem</button>
+        </form>
+      </div>
+    </div>
+    <div class="stat">
+      <div class="stat-k">Support PIN</div>
+      <div class="stat-v">{{if .Dashboard.SupportPin}}{{.Dashboard.SupportPin}}{{else}}—{{end}}</div>
+      <div class="stat-foot"><a href="/support">generate new</a></div>
+    </div>
+    <div class="stat">
+      <div class="stat-k">Services</div>
+      <div class="stat-v">{{.Dashboard.ProductCount}}</div>
+      <div class="stat-foot"><a href="/services">show services</a></div>
+    </div>
+    <div class="stat">
+      <div class="stat-k">Orders</div>
+      <div class="stat-v">{{.Dashboard.OrderCount}}</div>
+      <div class="stat-foot"><a href="/account">show orders</a></div>
+    </div>
+  </div>
+</section>
+
+{{if .Dashboard.Activity}}
+<section class="sec">
+  <h2 class="sec-label">Latest activities</h2>
+  <div class="card tbl-scroll">
+    <table class="tbl">
+      <tr><th>Activity</th><th style="text-align:right">Time</th></tr>
+      {{range .Dashboard.Activity}}
+      <tr><td><strong>{{.Text}}</strong></td><td style="text-align:right">{{.Time}}</td></tr>
+      {{end}}
+    </table>
+  </div>
+</section>
+{{end}}
+{{end}}
+
+<section class="sec" id="servers">
+  <h2 class="sec-label">KVM Servers</h2>
+  {{if .Servers}}
+  <div class="grid">
+    {{range .Servers}}
+    <a class="srv-card" href="/server/{{.ID}}">
+      <div>
+        <div class="srv-name">{{if .Name}}{{.Name}}{{else}}KVM Server{{end}}</div>
+        <div class="srv-id">{{.ID}}</div>
+      </div>
+      <span class="status pending" data-status-id="{{.ID}}">…</span>
+      <div class="srv-meta">
+        <span>Price <strong>{{printf "%.2f" .Price}} €</strong></span>
+        <span>Expires <strong>{{fmtUnix .ExpireAt}}</strong></span>
+        {{if .DeleteAt}}<span style="color:var(--red)">Deletion {{fmtUnix .DeleteAt}}</span>{{end}}
+      </div>
+    </a>
+    {{end}}
+  </div>
+  {{else}}
+  <div class="card">
+    <p class="mono-sm">No KVM servers on this account. Order one at
+    <a href="https://datalix.eu" rel="noopener noreferrer" style="text-decoration:underline">datalix.eu</a>.</p>
+  </div>
+  {{end}}
+</section>
+
+{{if .Others}}
+<section class="sec">
+  <h2 class="sec-label">Other services (not managed here)</h2>
+  <div class="card tbl-scroll">
+    <table class="tbl">
+      <tr><th>Product</th><th>Name</th><th>Price</th><th>Expires</th></tr>
+      {{range .Others}}
+      <tr>
+        <td><strong>{{.ProductDisplay}}</strong></td>
+        <td>{{if .Name}}{{.Name}}{{else}}—{{end}}</td>
+        <td>{{printf "%.2f" .Price}} €</td>
+        <td>{{fmtUnix .ExpireAt}}</td>
+      </tr>
+      {{end}}
+    </table>
+  </div>
+</section>
+{{end}}
+{{end}}
+{{end}}
