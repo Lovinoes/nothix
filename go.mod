@@ -1,3 +1,3 @@
-module datalix-panel
+module nothix
 
 go 1.22
