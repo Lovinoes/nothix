@@ -190,8 +190,8 @@ All of it is in [src/](src): `main.go` (routing, sessions, templates),
 `static/` sit beside them and are embedded with `go:embed`, so rebuild after
 editing those.
 
-## License
+## Credits
+- [Datalix](https://datalix.eu/) - https://datalix.eu/
+- [NOTHING](https://nothing.tech) Tech. All Rights Reserved.
+- [xeji01/nothingfont](https://github.com/xeji01/nothingfont) - https://github.com/xeji01/nothingfont
 
-MIT, see [LICENSE](LICENSE). © 2026 Lovinoes. Nothing (Ndot57 / NType82) typefaces
-bundled from [xeji01/nothingfont](https://github.com/xeji01/nothingfont) via
-[ndot-logo-generator](https://github.com/Lovinoes/ndot-logo-generator).
