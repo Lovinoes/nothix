@@ -4,8 +4,6 @@ A third-party customer panel for [Datalix](https://datalix.eu) with a
 Nothing inspired look. One Go binary, zero dependencies, talks straight to the
 official [Datalix API](https://apidoc.datalix.de/).
 
-Live at **[nothix.lovinoes.de](https://nothix.lovinoes.de/login)**.
-
 > [!NOTE]
 > A small project I built for fun, so **use at your own risk**. It does aim to be
 > secure by default, see [security](docs/security.md).
