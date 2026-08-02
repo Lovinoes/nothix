@@ -22,7 +22,7 @@
   <table class="tbl">
     <tr><th></th><th>Product</th><th>Service ID</th><th>Duration</th><th>Status</th><th></th></tr>
     {{range .Services}}
-    <tr {{if not .DeleteDone}}data-href="/server/{{.ID}}"{{end}}>
+    <tr {{if and (not .DeleteDone) (eq .ProductID 2.0)}}data-href="/server/{{.ID}}"{{end}}>
       <td>
         <form method="post" action="/services/{{.ID}}/fav">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
@@ -54,7 +54,8 @@
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
           <button class="btn" type="submit">hide</button>
         </form>
-        {{else}}<a class="btn" href="/server/{{.ID}}">manage</a>{{end}}
+        {{else if eq .ProductID 2.0}}<a class="btn" href="/server/{{.ID}}">manage</a>
+        {{else}}<a class="btn" href="https://datalix.eu/cp/service/{{.ID}}" data-dlg="ext-modal" data-ext="https://datalix.eu/cp/service/{{.ID}}">manage ↗</a>{{end}}
       </td>
     </tr>
     {{end}}

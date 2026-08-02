@@ -533,6 +533,7 @@ select option { background: var(--bg-2); color: var(--fg); }
 .bottom { align-items: flex-end; }
 .u { text-decoration: underline; text-underline-offset: 3px; }
 .field-row.row-inline { align-items: center; gap: 6px; flex-wrap: nowrap; }
+.nw { white-space: nowrap; }
 .copy-btn {
   background: none; border: 0; color: var(--fg-4); cursor: pointer;
   font-family: var(--font-ui);

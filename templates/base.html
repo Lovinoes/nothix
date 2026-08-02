@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>{{.Title}} · Nothix</title>
+<title>{{.Title}}</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23080808'/%3E%3Ccircle cx='16' cy='16' r='7' fill='%23d71921'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/panel.css">
 <script src="/static/panel.js" defer></script>
@@ -73,5 +73,43 @@
   </footer>
 </div>
 </div>
+<dialog id="ext-modal" class="modal modal-sm">
+  <div class="modal-head">
+    <h2 class="modal-title">Official panel</h2>
+  </div>
+  <p class="notice-warn">Nothix manages KVM servers only — this service opens in the official Datalix panel (datalix.eu). You need to be logged in there.</p>
+  <div class="btn-row end">
+    <button class="btn" type="button" data-close>close</button>
+    <a id="ext-link" class="btn btn-primary" data-close target="_blank" rel="noopener noreferrer"
+       href="https://datalix.eu/cp/">ok — open official panel</a>
+  </div>
+</dialog>
 </body>
 </html>{{end}}
+
+{{define "invoicefields"}}
+    <div class="field"><label for="pay-company">Company (optional — a company name registers your account as B2B)</label>
+      <input type="text" id="pay-company" name="company" maxlength="128" value="{{if .InvoiceData}}{{.InvoiceData.Company}}{{end}}"></div>
+    <div class="field-row">
+      <div class="field"><label for="pay-firstname">First name</label>
+        <input type="text" id="pay-firstname" name="firstname" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.FirstName}}{{end}}"></div>
+      <div class="field"><label for="pay-lastname">Last name</label>
+        <input type="text" id="pay-lastname" name="lastname" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.LastName}}{{end}}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label for="pay-street">Street and house number</label>
+        <input type="text" id="pay-street" name="street" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.Street}}{{end}}"></div>
+      <div class="field" style="max-width:140px"><label for="pay-zip">ZIP</label>
+        <input type="text" id="pay-zip" name="zip" maxlength="16" required value="{{if .InvoiceData}}{{.InvoiceData.Zip}}{{end}}"></div>
+      <div class="field"><label for="pay-city">City</label>
+        <input type="text" id="pay-city" name="city" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.City}}{{end}}"></div>
+    </div>
+    <div class="field" style="max-width:300px"><label for="pay-country">Tax country</label>
+      <select id="pay-country" name="country">
+        {{$cur := ""}}{{if .InvoiceData}}{{$cur = .InvoiceData.Country}}{{end}}
+        {{range .Countries}}
+        <option value="{{.ID}}" data-vat="{{printf "%g" .VatAmount}}" data-ewr="{{printf "%.0f" .Ewr}}" {{if eq .ID $cur}}selected{{end}}>{{.DisplayName}} — {{printf "%g" .VatAmount}}%</option>
+        {{end}}
+      </select>
+    </div>
+{{end}}

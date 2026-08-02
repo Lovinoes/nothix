@@ -175,7 +175,6 @@ var tmplFuncs = template.FuncMap{
 	"fmtUnix": func(ts int64) string { return fmtTS(ts, "02.01.2006") },
 	"gib":     func(mb int) string { return fmt.Sprintf("%g", float64(mb)/1024) },
 	"gb":      func(mb Num) string { return fmt.Sprintf("%.2f", float64(mb)/1024) },
-	"gbBytes": func(b Num) float64 { return float64(b) / 1e9 },
 	"daysLeft": func(ts int64) string {
 		if ts <= 0 {
 			return "—"
@@ -427,9 +426,9 @@ func newMux() http.Handler {
 	mux.HandleFunc("POST /server/{id}/hostname", requireAuth(serverHostname))
 	mux.HandleFunc("POST /server/{id}/rdns", requireAuth(serverRDNS))
 	mux.HandleFunc("POST /server/{id}/reinstall", requireAuth(serverReinstall))
-	mux.HandleFunc("POST /server/{id}/resetpassword", requireAuth(serverResetPassword))
-	mux.HandleFunc("POST /server/{id}/rescue", requireAuth(serverRescue))
-	mux.HandleFunc("POST /server/{id}/backup", requireAuth(serverBackupCreate))
+	mux.HandleFunc("POST /server/{id}/resetpassword", requireAuth(servicePost("resetpassword", "danger", "Password reset requested — check the action log.")))
+	mux.HandleFunc("POST /server/{id}/rescue", requireAuth(servicePost("rescue", "danger", "Rescue mode requested.")))
+	mux.HandleFunc("POST /server/{id}/backup", requireAuth(servicePost("backup", "backups", "Backup started.")))
 	mux.HandleFunc("POST /server/{id}/backup/delete", requireAuth(serverBackupDelete))
 	mux.HandleFunc("POST /server/{id}/backup/restore", requireAuth(serverBackupRestore))
 	mux.HandleFunc("POST /server/{id}/extend", requireAuth(serverExtend))
@@ -454,32 +453,13 @@ func newMux() http.Handler {
 	mux.HandleFunc("POST /server/{id}/iso/custom", requireAuth(serverCustomISOAdd))
 	mux.HandleFunc("POST /server/{id}/iso/custom/mount", requireAuth(serverCustomISOMount))
 	mux.HandleFunc("POST /server/{id}/iso/custom/delete", requireAuth(serverCustomISODelete))
-	mux.HandleFunc("POST /server/{id}/var", requireAuth(serverVarSet))
-	mux.HandleFunc("POST /server/{id}/bucket", requireAuth(serverBucketCreate))
-	mux.HandleFunc("POST /server/{id}/bucket/delete", requireAuth(serverBucketDelete))
-	mux.HandleFunc("POST /server/{id}/s3key", requireAuth(serverS3KeyCreate))
-	mux.HandleFunc("POST /server/{id}/s3key/delete", requireAuth(serverS3KeyDelete))
 	mux.HandleFunc("POST /server/{id}/sshkey", requireAuth(serverSSHKeyAdd))
 	mux.HandleFunc("POST /server/{id}/sshkey/delete", requireAuth(serverSSHKeyDelete))
-	mux.HandleFunc("POST /server/{id}/plesk", requireAuth(serverPlesk))
 	mux.HandleFunc("POST /server/{id}/unlockports", requireAuth(serverUnlockPorts))
-	mux.HandleFunc("POST /server/{id}/nc/update", requireAuth(serverNCUpdate))
-	mux.HandleFunc("POST /server/{id}/nc/resetdata", requireAuth(serverNCResetData))
-	mux.HandleFunc("POST /server/{id}/file/save", requireAuth(serverFileSave))
-	mux.HandleFunc("POST /server/{id}/file/delete", requireAuth(serverFileDelete))
-	mux.HandleFunc("POST /server/{id}/file/unzip", requireAuth(serverFileUnzip))
-	mux.HandleFunc("POST /server/{id}/file/download", requireAuth(serverFileDownload))
-	mux.HandleFunc("POST /server/{id}/mod/add", requireAuth(serverModAdd))
-	mux.HandleFunc("POST /server/{id}/mod/delete", requireAuth(serverModDelete))
-	mux.HandleFunc("POST /server/{id}/version", requireAuth(serverVersionChange))
-	mux.HandleFunc("POST /server/{id}/game", requireAuth(serverGameChange))
-	mux.HandleFunc("POST /server/{id}/extraport", requireAuth(serverExtraPort))
-	mux.HandleFunc("POST /server/{id}/sftp/reset", requireAuth(serverSFTPReset))
-	mux.HandleFunc("POST /server/{id}/db/reset", requireAuth(serverDBReset))
 	mux.HandleFunc("POST /server/{id}/addon/order", requireAuth(serverAddonOrder))
 	mux.HandleFunc("POST /server/{id}/addon/delete", requireAuth(serverAddonDelete))
 	mux.HandleFunc("POST /server/{id}/upgrade", requireAuth(serverUpgradeOrder))
-	mux.HandleFunc("POST /server/{id}/backup/cancel", requireAuth(serverCancelPlannedBackup))
+	mux.HandleFunc("POST /server/{id}/backup/cancel", requireAuth(servicePost("cancelplannedbackup", "backups", "Planned backup canceled.")))
 
 	// account / support / settings actions
 	mux.HandleFunc("POST /account/password", requireAuth(accountPassword))

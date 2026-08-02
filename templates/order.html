@@ -9,58 +9,22 @@
   <div class="card tbl-scroll">
     {{if .Packets}}
     <table class="tbl">
-      <tr><th>Name</th><th>Type</th><th>Status</th><th>Price</th><th>Configuration</th><th></th></tr>
+      <tr><th>Name</th><th>Status</th><th>Price</th><th>Configuration</th><th></th></tr>
       {{range .Packets}}
-
       {{if eq .Type "kvmpackage"}}
       <tr>
         <td><strong>{{.DisplayName}}</strong>{{if .Line}}<br><span class="mono-sm">{{.Line}}</span>{{end}}</td>
-        <td>KVM server</td>
         <td>{{if eq .Active 1.0}}<span class="chip ok">available</span>{{else}}<span class="chip err">sold out</span>{{end}}</td>
         <td><strong>{{printf "%.2f" .Price}} €</strong>/mo</td>
         <td class="mono-sm">{{.Cores}} cores · {{gb .Memory}} GiB memory · {{gb .Disk}} GiB disk · {{printf "%.0f" .Traffic}} TB traffic</td>
         <td class="r">{{if eq .Active 1.0}}<a class="btn btn-primary" href="/order/{{.ID}}">order</a>{{end}}</td>
       </tr>
       {{end}}
-
-      {{if eq .Type "dedicatedpackage"}}
-      <tr>
-        <td><strong>{{.DisplayName}}</strong>{{if .Line}}<br><span class="mono-sm">{{.Line}}</span>{{end}}</td>
-        <td>Dedicated server</td>
-        <td>{{if eq .Stock 0.0}}<span class="chip err">sold out</span>{{else}}<span class="chip ok">available</span>{{end}}</td>
-        <td><strong>{{printf "%.2f" .Price}} €</strong>/mo{{if .Setup}}<br><span class="mono-sm">+ {{printf "%.2f" .Setup}} € setup</span>{{end}}</td>
-        <td class="mono-sm">{{if .DiskBase}}Disk base {{.DiskBase}} · {{end}}{{printf "%.0f" .Traffic}} TB traffic</td>
-        <td class="r"><a class="btn" href="https://datalix.eu" rel="noopener noreferrer">datalix.eu ↗</a></td>
-      </tr>
-      {{end}}
-
-      {{if eq .Type "nextcloudpackage"}}
-      <tr>
-        <td><strong>{{.DisplayName}}</strong></td>
-        <td>Nextcloud</td>
-        <td>{{if eq .Status 1.0}}<span class="chip ok">available</span>{{else}}<span class="chip err">sold out</span>{{end}}</td>
-        <td><strong>{{printf "%.2f" .Price}} €</strong>/mo</td>
-        <td class="mono-sm">{{printf "%.0f" .Storage}} GB storage · {{printf "%.0f" .Traffic}} GB traffic</td>
-        <td class="r"><a class="btn" href="https://datalix.eu" rel="noopener noreferrer">datalix.eu ↗</a></td>
-      </tr>
-      {{end}}
-
-      {{if eq .Type "objectstoragepackage"}}
-      <tr>
-        <td><strong>{{.DisplayName}}</strong></td>
-        <td>Object storage</td>
-        <td><span class="chip ok">available</span></td>
-        <td><strong>{{printf "%.2f" .PricePerTB}} €</strong>/TB</td>
-        <td class="mono-sm">unlimited incoming traffic</td>
-        <td class="r"><a class="btn" href="https://datalix.eu" rel="noopener noreferrer">datalix.eu ↗</a></td>
-      </tr>
-      {{end}}
-
       {{end}}
     </table>
     {{else}}<p class="mono-sm">No packages available right now.</p>{{end}}
   </div>
-  <p class="mono-sm" style="margin-top:10px">KVM servers order directly here. Other product types are ordered on the official site.</p>
+  <p class="mono-sm" style="margin-top:10px">Only KVM servers are ordered here. All other product types are ordered on datalix.eu.</p>
 </section>
 {{end}}
 {{end}}

@@ -43,30 +43,7 @@
   <form method="post" action="/credit/invoicedata">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
     <input type="hidden" name="method" class="pay-method-input">
-    <div class="field"><label for="pay-company">Company (optional — a company name registers your account as B2B)</label>
-      <input type="text" id="pay-company" name="company" maxlength="128" value="{{if .InvoiceData}}{{.InvoiceData.Company}}{{end}}"></div>
-    <div class="field-row">
-      <div class="field"><label for="pay-firstname">First name</label>
-        <input type="text" id="pay-firstname" name="firstname" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.FirstName}}{{end}}"></div>
-      <div class="field"><label for="pay-lastname">Last name</label>
-        <input type="text" id="pay-lastname" name="lastname" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.LastName}}{{end}}"></div>
-    </div>
-    <div class="field-row">
-      <div class="field"><label for="pay-street">Street and house number</label>
-        <input type="text" id="pay-street" name="street" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.Street}}{{end}}"></div>
-      <div class="field" style="max-width:140px"><label for="pay-zip">ZIP</label>
-        <input type="text" id="pay-zip" name="zip" maxlength="16" required value="{{if .InvoiceData}}{{.InvoiceData.Zip}}{{end}}"></div>
-      <div class="field"><label for="pay-city">City</label>
-        <input type="text" id="pay-city" name="city" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.City}}{{end}}"></div>
-    </div>
-    <div class="field" style="max-width:300px"><label for="pay-country">Tax country</label>
-      <select id="pay-country" name="country">
-        {{$cur := ""}}{{if .InvoiceData}}{{$cur = .InvoiceData.Country}}{{end}}
-        {{range .Countries}}
-        <option value="{{.ID}}" data-vat="{{printf "%g" .VatAmount}}" data-ewr="{{printf "%.0f" .Ewr}}" {{if eq .ID $cur}}selected{{end}}>{{.DisplayName}} — {{printf "%g" .VatAmount}}%</option>
-        {{end}}
-      </select>
-    </div>
+    {{template "invoicefields" .}}
     <p class="mono-sm">Address details are stored for tax purposes. Incorrect information may result in
       the order being canceled — you are responsible for its correctness.</p>
     <button class="btn" type="submit">save invoice data</button>

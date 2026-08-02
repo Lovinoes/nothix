@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"path"
 	"regexp"
 	"slices"
 	"sort"
@@ -167,7 +166,6 @@ func greeting() string {
 type overviewView struct {
 	Dashboard  *Dashboard
 	Greeting   string
-	Username   string
 	EmailState int // 0=unverified, 1=verified, 2=throwaway
 	Servers    []Service
 }
@@ -182,11 +180,9 @@ func overviewPage(w http.ResponseWriter, r *http.Request, s *session) {
 			apiFail(w, r, "/", err)
 			return
 		}
-		if v.Err == "" {
-			v.Err = err.Error()
-		}
+		v.Err = cmp.Or(v.Err, err.Error())
 	}
-	ov := overviewView{Greeting: greeting(), Username: s.username}
+	ov := overviewView{Greeting: greeting()}
 	for i := range all {
 		all[i].Name = cleanName(all[i].Name)
 	}
@@ -231,9 +227,7 @@ func servicesPage(w http.ResponseWriter, r *http.Request, s *session) {
 			apiFail(w, r, "/services", err)
 			return
 		}
-		if v.Err == "" {
-			v.Err = err.Error()
-		}
+		v.Err = cmp.Or(v.Err, err.Error())
 	}
 	for i := range list {
 		list[i].Name = cleanName(list[i].Name)
@@ -293,23 +287,7 @@ type serverView struct {
 	ISOList     []OSEntry
 	UplinkMB    int // product uplink converted to MB/s for the edit form
 	MaxUplinkMB int
-	HWKV        []kvRow // generic hardware view for non-KVM products
-	Buckets     []bucketRow
-	S3Keys      []S3Key
-	Vars        []GameVariable
 	SSHKeys     []SSHKey
-	// files tab
-	Files    []FileEntry
-	Dir      string
-	Crumbs   []crumb
-	FileName string
-	FileData string
-	// gameserver extras
-	Mods         []Mod
-	ModQuery     string
-	GameVersions []GameVersion
-	Games        []Game
-	NetPorts     []NetPort
 	// addons + upgrade
 	Addons      []ServiceAddon
 	AddonOffers []AddonOffer
@@ -319,13 +297,6 @@ type serverView struct {
 	IncFrom, IncTo, IncPrev, IncNext int
 	IncHasPrev, IncHasNext           bool
 }
-
-type bucketRow struct {
-	Bucket
-	Endpoint string
-}
-
-type crumb struct{ Name, Path string }
 
 type upgradeRow struct{ ID, Label, Details string }
 
@@ -356,32 +327,10 @@ func upgradeRowOf(m map[string]any) upgradeRow {
 	return row
 }
 
-// remoteDir/remoteFile sanitize user-supplied paths on the remote gameserver.
-func remoteDir(p string) string {
-	p = path.Clean("/" + p)
-	if p != "/" {
-		p += "/"
-	}
-	return p
-}
-
-func remoteFile(p string) string {
-	if p == "" || !strings.HasPrefix(p, "/") || badInput(p, 1024) {
-		return ""
-	}
-	// reject traversal segments only — "my..cfg" is a legal filename
-	for _, seg := range strings.Split(p, "/") {
-		if seg == ".." {
-			return ""
-		}
-	}
-	return p
-}
-
 type kvRow struct{ K, V string }
 
 // kvRows flattens an unknown-shape API object (scalars plus one level of
-// object arrays, like the dedicated-server hardware response) for display.
+// object arrays, like the per-product fields of an upgrade offer) for display.
 func kvRows(raw map[string]any) []kvRow {
 	flat := func(m map[string]any) string {
 		var parts []string
@@ -419,8 +368,7 @@ func kvRows(raw map[string]any) []kvRow {
 var serverTabs = map[string]bool{"network": true, "hardware": true, "live": true,
 	"traffic": true, "backups": true, "tasks": true, "ddos": true,
 	"logs": true, "settings": true, "billing": true, "danger": true,
-	"buckets": true, "keys": true, "vars": true, "sshkeys": true,
-	"files": true, "mods": true, "ports": true, "addons": true}
+	"sshkeys": true, "addons": true}
 
 func serverPage(w http.ResponseWriter, r *http.Request, s *session) {
 	id := r.PathValue("id")
@@ -440,18 +388,11 @@ func serverPage(w http.ResponseWriter, r *http.Request, s *session) {
 		return
 	}
 	info.Service.Name = cleanName(info.Service.Name)
-	// products without an IP tab land on their first available tab instead
-	if tab == "network" && !bool(info.Display.IP) {
-		switch {
-		case bool(info.Display.Hardware):
-			tab = "hardware"
-		case bool(info.Display.LiveData):
-			tab = "live"
-		case bool(info.Display.Backup):
-			tab = "backups"
-		default:
-			tab = "settings"
-		}
+	// Nothix manages KVM servers only — everything else lives in the official panel
+	if info.Service.ProductID != 2 {
+		apiFail(w, r, "/services",
+			errors.New("This service type is managed in the official Datalix panel (datalix.eu)."))
+		return
 	}
 
 	// tabs fetch only what they show — keeps us far away from the API rate limits
@@ -466,17 +407,9 @@ func serverPage(w http.ResponseWriter, r *http.Request, s *session) {
 		}
 	case "hardware":
 		if info.Display.Hardware {
-			// shape differs per product — decode the KVM struct from the raw
-			// map and fall back to a generic key/value view for everything else
-			var raw map[string]any
-			if api.get("/service/"+pid+"/hardware", &raw) == nil {
-				b, _ := json.Marshal(raw)
-				hw := &Hardware{}
-				json.Unmarshal(b, hw)
-				sv.Hardware = hw
-				if hw.Cores == 0 {
-					sv.HWKV = kvRows(raw)
-				}
+			var hw Hardware
+			if api.get("/service/"+pid+"/hardware", &hw) == nil {
+				sv.Hardware = &hw
 			}
 		}
 	case "traffic":
@@ -495,74 +428,9 @@ func serverPage(w http.ResponseWriter, r *http.Request, s *session) {
 		if info.Display.Backup {
 			api.get("/service/"+pid+"/backup", &sv.Backups)
 		}
-	case "buckets":
-		if info.Display.BucketList {
-			var bs []Bucket
-			if api.get("/service/"+pid+"/buckets", &bs) == nil {
-				for _, b := range bs {
-					ep := b.Name + ".s3.fra.databucket.eu"
-					if strings.Contains(b.Name, ".") { // dotted names break TLS on the subdomain form
-						ep = "s3.fra.databucket.eu/" + b.Name
-					}
-					sv.Buckets = append(sv.Buckets, bucketRow{b, ep})
-				}
-			}
-		}
-	case "keys":
-		if info.Display.KeyList {
-			api.get("/service/"+pid+"/keys", &sv.S3Keys)
-		}
-	case "vars":
-		if len(info.Product.Settings) > 0 { // nextcloud sends its settings inline
-			for _, k := range slices.Sorted(maps.Keys(info.Product.Settings)) {
-				sv.Vars = append(sv.Vars, GameVariable{Name: k, EnvVariable: k,
-					ServerValue: info.Product.Settings[k], CanEdit: true})
-			}
-		} else if info.Display.Settings {
-			api.get("/service/"+pid+"/settings", &sv.Vars)
-		}
-		if info.Service.ProductID == 4 {
-			api.get("/service/"+pid+"/version", &sv.GameVersions)
-			api.get("/service/"+pid+"/gamechanger", &sv.Games)
-		}
 	case "sshkeys":
 		if info.Display.SSHKeys {
 			api.get("/service/"+pid+"/sshkeys", &sv.SSHKeys)
-		}
-	case "files":
-		if info.Display.Files {
-			sv.Dir = remoteDir(r.URL.Query().Get("dir"))
-			api.postOut("/service/"+pid+"/files", map[string]string{"directory": sv.Dir}, &sv.Files)
-			p := "/"
-			for _, part := range strings.Split(strings.Trim(sv.Dir, "/"), "/") {
-				if part == "" {
-					continue
-				}
-				p += part + "/"
-				sv.Crumbs = append(sv.Crumbs, crumb{part, p})
-			}
-			if f := remoteFile(r.URL.Query().Get("file")); f != "" {
-				var out struct {
-					Data string `json:"data"`
-				}
-				if api.get("/service/"+pid+"/file?filepath="+url.QueryEscape(f), &out) == nil {
-					sv.FileName = f
-					sv.FileData = out.Data
-				}
-			}
-		}
-	case "mods":
-		if info.Product.ModManager {
-			sv.ModQuery = strings.TrimSpace(r.URL.Query().Get("q"))
-			if sv.ModQuery != "" {
-				api.postOut("/service/"+pid+"/mod/list", map[string]string{"query": sv.ModQuery}, &sv.Mods)
-			} else {
-				api.get("/service/"+pid+"/mods", &sv.Mods)
-			}
-		}
-	case "ports":
-		if info.Service.ProductID == 4 {
-			api.get("/service/"+pid+"/networkdata", &sv.NetPorts)
 		}
 	case "addons":
 		if info.Service.Addons {
@@ -669,19 +537,14 @@ func ordersPage(w http.ResponseWriter, r *http.Request, s *session) {
 			apiFail(w, r, "/orders", err)
 			return
 		}
-		if v.Err == "" {
-			v.Err = err.Error()
-		}
+		v.Err = cmp.Or(v.Err, err.Error())
 	}
 	ov := ordersView{Total: op.PageInfo.Total}
 	for _, o := range op.Data {
 		o.OrderInfo = stripTags(brToSep.Replace(o.OrderInfo))
 		st, cls := orderStatus(int(o.Status))
-		tt := orderTypes[o.Type]
-		if tt == "" {
-			tt = o.Type
-		}
-		ov.Rows = append(ov.Rows, orderRow{Order: o, StatusText: st, StatusClass: cls, TypeText: tt})
+		ov.Rows = append(ov.Rows, orderRow{Order: o, StatusText: st, StatusClass: cls,
+			TypeText: cmp.Or(orderTypes[o.Type], o.Type)})
 	}
 	step := cmp.Or(op.PageInfo.StepSize, 10)
 	ov.From = op.PageInfo.Last
@@ -968,7 +831,8 @@ func creditTopup(w http.ResponseWriter, r *http.Request, s *session) {
 		map[string]string{"amount": amount, "tax": string(inv.Country)}, method.ID, "/credit")
 }
 
-// createAndPay creates an order at path and forwards to the payment provider.
+// createAndPay creates an order at path, pays it, and forwards the browser to
+// the payment provider's checkout link.
 func createAndPay(w http.ResponseWriter, r *http.Request, api API, path string,
 	form map[string]string, method, target string) {
 	var created struct {
@@ -982,25 +846,16 @@ func createAndPay(w http.ResponseWriter, r *http.Request, api API, path string,
 		apiFail(w, r, target, errors.New("order could not be created"))
 		return
 	}
-	payOrderRedirect(w, r, api, string(created.ID), method, target)
-}
-
-// payOrderRedirect finishes a payment: POST order/{id}/pay, then forward the
-// browser to the payment provider's checkout link.
-func payOrderRedirect(w http.ResponseWriter, r *http.Request, api API, orderID, method, target string) {
 	var pay struct {
 		URL  string `json:"url"`
 		Link string `json:"link"`
 	}
-	if err := api.postOut("/order/"+url.PathEscape(orderID)+"/pay",
+	if err := api.postOut("/order/"+url.PathEscape(string(created.ID))+"/pay",
 		map[string]string{"paymentMethod": method}, &pay); err != nil {
 		apiFail(w, r, target, err)
 		return
 	}
-	dest := pay.URL
-	if dest == "" {
-		dest = pay.Link
-	}
+	dest := cmp.Or(pay.URL, pay.Link)
 	if !strings.HasPrefix(dest, "https://") {
 		apiFail(w, r, target, errors.New("payment provider returned no checkout link"))
 		return
@@ -1196,10 +1051,7 @@ func orderSubmit(w http.ResponseWriter, r *http.Request, s *session) {
 	}
 	err := api.postOut("/order/"+url.PathEscape(string(created.ID))+"/pay",
 		map[string]string{"paymentMethod": method}, &pay)
-	dest := pay.URL
-	if dest == "" {
-		dest = pay.Link
-	}
+	dest := cmp.Or(pay.URL, pay.Link)
 	if err == nil && strings.HasPrefix(dest, "https://") {
 		http.Redirect(w, r, dest, http.StatusSeeOther)
 		return
@@ -1314,9 +1166,7 @@ func ticketCreate(w http.ResponseWriter, r *http.Request, s *session) {
 		http.Error(w, "invalid service", http.StatusBadRequest)
 		return
 	}
-	if service == "" {
-		service = "none"
-	}
+	service = cmp.Or(service, "none")
 	var created struct {
 		ID Num `json:"id"`
 	}
@@ -1346,7 +1196,6 @@ func supportPage(w http.ResponseWriter, r *http.Request, s *session) {
 
 type settingsView struct {
 	Tab           string
-	Lang          string
 	IPCheck       bool
 	PermSession   bool
 	TwoFAActive   bool
@@ -1362,19 +1211,14 @@ var settingsTabs = map[string]bool{"general": true, "sshkeys": true, "notificati
 
 // buildSettingsGeneral loads everything the General tab shows.
 func buildSettingsGeneral(api API, s *session, sv *settingsView) {
-	sv.Lang = "en"
 	var ki struct {
 		UserInfo struct {
-			Lang         string `json:"lang"`
-			IPCheck      Flag   `json:"ipcheck"`
-			PermSessions Flag   `json:"permsessions"`
-			TwoFAStatus  Num    `json:"twofastatus"`
+			IPCheck      Flag `json:"ipcheck"`
+			PermSessions Flag `json:"permsessions"`
+			TwoFAStatus  Num  `json:"twofastatus"`
 		} `json:"userInfo"`
 	}
 	if api.get("/user/apikey/"+url.PathEscape(s.token), &ki) == nil {
-		if ki.UserInfo.Lang != "" {
-			sv.Lang = ki.UserInfo.Lang
-		}
 		sv.IPCheck = bool(ki.UserInfo.IPCheck)
 		sv.PermSession = bool(ki.UserInfo.PermSessions)
 		sv.TwoFAActive = ki.UserInfo.TwoFAStatus == 2
@@ -1413,8 +1257,6 @@ func settingsPage(w http.ResponseWriter, r *http.Request, s *session) {
 	render(w, "settings", v)
 }
 
-var validLangs = map[string]bool{"de": true, "en": true}
-
 // userAction runs one API call for the signed-in user, then redirects with a flash.
 func userAction(w http.ResponseWriter, r *http.Request, s *session, target, okMsg string,
 	call func(api API, uid string) error) {
@@ -1434,13 +1276,8 @@ func chk(r *http.Request, k string) string {
 }
 
 func settingsAccount(w http.ResponseWriter, r *http.Request, s *session) {
-	lang := r.PostFormValue("lang")
-	if !validLangs[lang] {
-		http.Error(w, "invalid language", http.StatusBadRequest)
-		return
-	}
 	userAction(w, r, s, "/settings", "Account data saved.", func(api API, uid string) error {
-		return api.post("/user/"+uid+"/", map[string]string{"lang": lang,
+		return api.post("/user/"+uid+"/", map[string]string{
 			"ipcheck": chk(r, "ipcheck"), "permsessions": chk(r, "permsessions")})
 	})
 }
@@ -1617,22 +1454,13 @@ func serverReinstall(w http.ResponseWriter, r *http.Request, s *session) {
 	})
 }
 
-func serverResetPassword(w http.ResponseWriter, r *http.Request, s *session) {
-	serviceAction(w, r, s, "danger", "Password reset requested — check the action log.", func(api API, id string) error {
-		return api.post("/service/"+id+"/resetpassword", nil)
-	})
-}
-
-func serverRescue(w http.ResponseWriter, r *http.Request, s *session) {
-	serviceAction(w, r, s, "danger", "Rescue mode requested.", func(api API, id string) error {
-		return api.post("/service/"+id+"/rescue", nil)
-	})
-}
-
-func serverBackupCreate(w http.ResponseWriter, r *http.Request, s *session) {
-	serviceAction(w, r, s, "backups", "Backup started.", func(api API, id string) error {
-		return api.post("/service/"+id+"/backup", nil)
-	})
+// servicePost handles the plain "POST /service/{id}/<path>, empty body" actions.
+func servicePost(path, tab, okMsg string) func(http.ResponseWriter, *http.Request, *session) {
+	return func(w http.ResponseWriter, r *http.Request, s *session) {
+		serviceAction(w, r, s, tab, okMsg, func(api API, id string) error {
+			return api.post("/service/"+id+"/"+path, nil)
+		})
+	}
 }
 
 func backupParam(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -2275,61 +2103,7 @@ func emaillogPage(w http.ResponseWriter, r *http.Request, s *session) {
 	render(w, "emaillog", v)
 }
 
-/* ── per-product management: variables, buckets, S3 keys, SSH keys, plesk ── */
-
-var reBucketName = regexp.MustCompile(`^[a-z0-9.-]{3,63}$`)
-
-func serverVarSet(w http.ResponseWriter, r *http.Request, s *session) {
-	variable := strings.TrimSpace(r.PostFormValue("variable"))
-	value := r.PostFormValue("value")
-	if variable == "" || badInput(variable, 128) || badInput(value, 1024) {
-		http.Error(w, "invalid variable", http.StatusBadRequest)
-		return
-	}
-	serviceAction(w, r, s, "vars", "Variable saved.", func(api API, id string) error {
-		return api.post("/service/"+id+"/settings/variable",
-			map[string]string{"variable": variable, "value": value})
-	})
-}
-
-func serverBucketCreate(w http.ResponseWriter, r *http.Request, s *session) {
-	name := r.PostFormValue("name")
-	if !reBucketName.MatchString(name) {
-		http.Error(w, "invalid bucket name", http.StatusBadRequest)
-		return
-	}
-	serviceAction(w, r, s, "buckets", "Bucket created.", func(api API, id string) error {
-		return api.post("/service/"+id+"/buckets", map[string]string{"name": name})
-	})
-}
-
-func serverBucketDelete(w http.ResponseWriter, r *http.Request, s *session) {
-	name := r.PostFormValue("name")
-	if !reBucketName.MatchString(name) {
-		http.Error(w, "invalid bucket name", http.StatusBadRequest)
-		return
-	}
-	serviceAction(w, r, s, "buckets", "Bucket deleted.", func(api API, id string) error {
-		return api.delete("/service/" + id + "/buckets/" + url.PathEscape(name))
-	})
-}
-
-func serverS3KeyCreate(w http.ResponseWriter, r *http.Request, s *session) {
-	serviceAction(w, r, s, "keys", "S3 key created.", func(api API, id string) error {
-		return api.post("/service/"+id+"/keys", nil)
-	})
-}
-
-func serverS3KeyDelete(w http.ResponseWriter, r *http.Request, s *session) {
-	key := r.PostFormValue("key")
-	if key == "" || badInput(key, 128) {
-		http.Error(w, "invalid key", http.StatusBadRequest)
-		return
-	}
-	serviceAction(w, r, s, "keys", "S3 key deleted.", func(api API, id string) error {
-		return api.delete("/service/" + id + "/keys/" + url.PathEscape(key))
-	})
-}
+/* ── ssh keys, mail ports ── */
 
 func serverSSHKeyAdd(w http.ResponseWriter, r *http.Request, s *session) {
 	name := strings.TrimSpace(r.PostFormValue("displayname"))
@@ -2356,27 +2130,6 @@ func serverSSHKeyDelete(w http.ResponseWriter, r *http.Request, s *session) {
 	})
 }
 
-// serverPlesk fetches a one-shot Plesk login URL and forwards the browser.
-func serverPlesk(w http.ResponseWriter, r *http.Request, s *session) {
-	id := r.PathValue("id")
-	if !reUUID.MatchString(id) {
-		http.NotFound(w, r)
-		return
-	}
-	var out struct {
-		URL string `json:"url"`
-	}
-	err := (API{token: s.token}).get("/service/"+url.PathEscape(id)+"/plesklogin", &out)
-	if err != nil || !strings.HasPrefix(out.URL, "https://") {
-		if err == nil {
-			err = errors.New("no Plesk login URL returned")
-		}
-		apiFail(w, r, "/server/"+id, err)
-		return
-	}
-	http.Redirect(w, r, out.URL, http.StatusSeeOther)
-}
-
 func serverUnlockPorts(w http.ResponseWriter, r *http.Request, s *session) {
 	reason := strings.TrimSpace(r.PostFormValue("reason"))
 	if reason == "" || badInput(reason, 512) {
@@ -2388,162 +2141,7 @@ func serverUnlockPorts(w http.ResponseWriter, r *http.Request, s *session) {
 	})
 }
 
-// nextcloud only: in-place update and full data reset
-func serverNCUpdate(w http.ResponseWriter, r *http.Request, s *session) {
-	serviceAction(w, r, s, "", "Update started — this may take a few minutes.",
-		func(api API, id string) error { return api.post("/service/"+id+"/update", nil) })
-}
-
-func serverNCResetData(w http.ResponseWriter, r *http.Request, s *session) {
-	if r.PostFormValue("confirm") != "1" {
-		apiFail(w, r, "/server/"+r.PathValue("id")+"?tab=danger",
-			errors.New("confirm the data deletion first"))
-		return
-	}
-	serviceAction(w, r, s, "", "Reset started — all Nextcloud data is being wiped.",
-		func(api API, id string) error { return api.post("/service/"+id+"/resetdata", nil) })
-}
-
-/* ── gameserver files, mods, versions, ports; addons + upgrades ── */
-
-// filesTab builds the ?tab=files&dir=… redirect target so actions land back
-// in the directory they were issued from.
-func filesTab(dir string) string { return "files&dir=" + url.QueryEscape(dir) }
-
-func serverFileSave(w http.ResponseWriter, r *http.Request, s *session) {
-	p := remoteFile(r.PostFormValue("path"))
-	if p == "" {
-		http.Error(w, "invalid file path", http.StatusBadRequest)
-		return
-	}
-	// browsers CRLF-normalize textarea submissions; undo it or every save
-	// rewrites LF files (shebangs, yaml) with \r\n
-	data := strings.ReplaceAll(r.PostFormValue("data"), "\r\n", "\n")
-	serviceAction(w, r, s, filesTab(path.Dir(p))+"&file="+url.QueryEscape(p), "File saved.",
-		func(api API, id string) error {
-			return api.post("/service/"+id+"/file", map[string]string{"file": p, "data": data})
-		})
-}
-
-func serverFileDelete(w http.ResponseWriter, r *http.Request, s *session) {
-	p := remoteFile(strings.TrimSuffix(r.PostFormValue("path"), "/"))
-	if p == "" {
-		http.Error(w, "invalid file path", http.StatusBadRequest)
-		return
-	}
-	serviceAction(w, r, s, filesTab(path.Dir(p)), "Deleted.", func(api API, id string) error {
-		return api.post("/service/"+id+"/file/delete", map[string]string{"filepath": p})
-	})
-}
-
-func serverFileUnzip(w http.ResponseWriter, r *http.Request, s *session) {
-	name := r.PostFormValue("name")
-	dir := remoteDir(r.PostFormValue("dir"))
-	if name == "" || strings.ContainsAny(name, "/\\") || remoteFile(dir+name) == "" {
-		http.Error(w, "invalid file", http.StatusBadRequest)
-		return
-	}
-	serviceAction(w, r, s, filesTab(dir), "Unzipped.", func(api API, id string) error {
-		_, err := api.raw(http.MethodGet, "/service/"+id+"/file/unzip?file="+url.QueryEscape(name)+
-			"&path="+url.QueryEscape(dir), nil)
-		return err
-	})
-}
-
-// serverFileDownload fetches a one-shot download link and forwards to it.
-func serverFileDownload(w http.ResponseWriter, r *http.Request, s *session) {
-	id := r.PathValue("id")
-	p := remoteFile(r.PostFormValue("path"))
-	if !reUUID.MatchString(id) || p == "" {
-		http.Error(w, "invalid request", http.StatusBadRequest)
-		return
-	}
-	target := "/server/" + id + "?tab=" + filesTab(path.Dir(p))
-	var out struct {
-		Link string `json:"link"`
-	}
-	err := (API{token: s.token}).get("/service/"+url.PathEscape(id)+"/file/download?filepath="+
-		url.QueryEscape(p), &out)
-	if err != nil || !strings.HasPrefix(out.Link, "https://") {
-		if err == nil {
-			err = errors.New("no download link returned")
-		}
-		apiFail(w, r, target, err)
-		return
-	}
-	http.Redirect(w, r, out.Link, http.StatusSeeOther)
-}
-
-func modParam(w http.ResponseWriter, r *http.Request) (string, bool) {
-	m := strings.TrimSpace(r.PostFormValue("mod"))
-	if m == "" || badInput(m, 128) {
-		http.Error(w, "invalid mod", http.StatusBadRequest)
-		return "", false
-	}
-	return m, true
-}
-
-func serverModAdd(w http.ResponseWriter, r *http.Request, s *session) {
-	m, ok := modParam(w, r)
-	if !ok {
-		return
-	}
-	serviceAction(w, r, s, "mods", "Mod added.", func(api API, id string) error {
-		return api.post("/service/"+id+"/mod/add", map[string]string{"mod": m})
-	})
-}
-
-func serverModDelete(w http.ResponseWriter, r *http.Request, s *session) {
-	m, ok := modParam(w, r)
-	if !ok {
-		return
-	}
-	serviceAction(w, r, s, "mods", "Mod deleted.", func(api API, id string) error {
-		return api.post("/service/"+id+"/mod/delete", map[string]string{"mod": m})
-	})
-}
-
-func serverVersionChange(w http.ResponseWriter, r *http.Request, s *session) {
-	v := r.PostFormValue("version")
-	if v == "" || len(v) > 64 || r.PostFormValue("confirm") != "yes" {
-		http.Error(w, "invalid version change", http.StatusBadRequest)
-		return
-	}
-	serviceAction(w, r, s, "vars", "Version change started.", func(api API, id string) error {
-		return api.post("/service/"+id+"/version", map[string]string{"version": v})
-	})
-}
-
-func serverGameChange(w http.ResponseWriter, r *http.Request, s *session) {
-	game, version := r.PostFormValue("game"), r.PostFormValue("version")
-	if game == "" || version == "" || len(game) > 64 || len(version) > 64 ||
-		r.PostFormValue("confirm") != "yes" {
-		http.Error(w, "invalid game change", http.StatusBadRequest)
-		return
-	}
-	serviceAction(w, r, s, "vars", "Game change started — the server is being reinstalled.",
-		func(api API, id string) error {
-			return api.post("/service/"+id+"/gamechanger", map[string]string{"game": game, "version": version})
-		})
-}
-
-func serverExtraPort(w http.ResponseWriter, r *http.Request, s *session) {
-	serviceAction(w, r, s, "ports", "Extra port added.", func(api API, id string) error {
-		return api.post("/service/"+id+"/extraport", nil)
-	})
-}
-
-func serverSFTPReset(w http.ResponseWriter, r *http.Request, s *session) {
-	serviceAction(w, r, s, "", "SFTP login data reset.", func(api API, id string) error {
-		return api.post("/service/"+id+"/sftp/reset", nil)
-	})
-}
-
-func serverDBReset(w http.ResponseWriter, r *http.Request, s *session) {
-	serviceAction(w, r, s, "", "Database login data reset.", func(api API, id string) error {
-		return api.post("/service/"+id+"/db/reset", nil)
-	})
-}
+/* ── addons + upgrades ── */
 
 func serverAddonDelete(w http.ResponseWriter, r *http.Request, s *session) {
 	addon := r.PostFormValue("addon")
@@ -2602,10 +2200,4 @@ func serverUpgradeOrder(w http.ResponseWriter, r *http.Request, s *session) {
 		return
 	}
 	orderAndPay(w, r, s, "/upgrade", "billing", map[string]string{"package": pkg})
-}
-
-func serverCancelPlannedBackup(w http.ResponseWriter, r *http.Request, s *session) {
-	serviceAction(w, r, s, "backups", "Planned backup canceled.", func(api API, id string) error {
-		return api.post("/service/"+id+"/cancelplannedbackup", nil)
-	})
 }

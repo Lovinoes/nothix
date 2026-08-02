@@ -156,7 +156,13 @@ document.querySelectorAll('dialog.modal').forEach(function (dlg) {
   dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });
 });
 document.querySelectorAll('[data-dlg]').forEach(function (b) {
-  b.addEventListener('click', function () {
+  b.addEventListener('click', function (e) {
+    e.preventDefault(); // openers may be <a> fallback-links (no-JS goes to href)
+    var ext = b.getAttribute('data-ext');
+    if (ext) {
+      var l = document.getElementById('ext-link');
+      if (l) l.href = ext;
+    }
     var d = document.getElementById(b.getAttribute('data-dlg'));
     if (d) d.showModal();
   });
@@ -249,19 +255,6 @@ if (accSvc) {
   };
   accSvc.addEventListener('change', accSync);
   accSync();
-}
-/* game changer: only the selected game's version select is visible/submitted */
-var gameSel = document.getElementById('game-select');
-if (gameSel) {
-  var gameSync = function () {
-    document.querySelectorAll('.game-set').forEach(function (fs) {
-      var on = fs.getAttribute('data-game') === gameSel.value;
-      fs.hidden = !on;
-      fs.disabled = !on;
-    });
-  };
-  gameSel.addEventListener('change', gameSync);
-  gameSync();
 }
 /* permission trees: checking a sub checks its parent, unchecking a parent
    clears its subs (same behavior as the official panel) */

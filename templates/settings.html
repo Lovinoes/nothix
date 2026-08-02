@@ -53,13 +53,6 @@
   <div class="card">
     <form method="post" action="/settings/account">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
-      <div class="field" style="max-width:240px">
-        <label for="lang">Language</label>
-        <select id="lang" name="lang">
-          <option value="en" {{if eq .Lang "en"}}selected{{end}}>English</option>
-          <option value="de" {{if eq .Lang "de"}}selected{{end}}>German</option>
-        </select>
-      </div>
       <div class="check">
         <input type="checkbox" id="ipcheck" name="ipcheck" value="1" {{if .IPCheck}}checked{{end}}>
         <label for="ipcheck">Bind official-panel sessions to their IP address</label>
@@ -116,32 +109,7 @@
     <p class="mono-sm" style="margin-bottom:12px">Values are blurred — hover or focus a field to reveal it.</p>
     <form method="post" action="/settings/invoicedata" class="censor">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
-      <div class="field-row">
-        <div class="field"><label for="firstname">First name</label>
-          <input type="text" id="firstname" name="firstname" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.FirstName}}{{end}}"></div>
-        <div class="field"><label for="lastname">Last name</label>
-          <input type="text" id="lastname" name="lastname" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.LastName}}{{end}}"></div>
-      </div>
-      <div class="field-row">
-        <div class="field"><label for="street">Street and house number</label>
-          <input type="text" id="street" name="street" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.Street}}{{end}}"></div>
-        <div class="field" style="max-width:140px"><label for="zip">ZIP</label>
-          <input type="text" id="zip" name="zip" maxlength="16" required value="{{if .InvoiceData}}{{.InvoiceData.Zip}}{{end}}"></div>
-        <div class="field"><label for="city">City</label>
-          <input type="text" id="city" name="city" maxlength="128" required value="{{if .InvoiceData}}{{.InvoiceData.City}}{{end}}"></div>
-      </div>
-      <div class="field-row">
-        <div class="field"><label for="country">Tax country</label>
-          <select id="country" name="country">
-            {{$cur := ""}}{{if .InvoiceData}}{{$cur = .InvoiceData.Country}}{{end}}
-            {{range .Countries}}
-            <option value="{{.ID}}" {{if eq .ID $cur}}selected{{end}}>{{.DisplayName}} — {{printf "%.0f" .VatAmount}}%</option>
-            {{end}}
-          </select>
-        </div>
-        <div class="field"><label for="company">Company (optional)</label>
-          <input type="text" id="company" name="company" maxlength="128" value="{{if .InvoiceData}}{{.InvoiceData.Company}}{{end}}"></div>
-      </div>
+      {{template "invoicefields" .}}
       <p class="mono-sm" style="margin-bottom:12px">Address details are stored for tax purposes — you are responsible for their correctness.</p>
       <button class="btn" type="submit">save invoice data</button>
     </form>

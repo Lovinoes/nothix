@@ -2,7 +2,7 @@
 {{with .Data}}
 <section class="hero">
   <div>
-    <h1 class="hero-title">{{.Greeting}}{{if .Username}}, {{.Username}}{{end}}</h1>
+    <h1 class="hero-title">{{.Greeting}}{{if $.User}}, {{$.User}}{{end}}</h1>
     <div class="hero-chips">
       <span class="chip">Customer</span>
       {{if eq .EmailState 1}}
@@ -84,7 +84,7 @@
   {{if .Servers}}
   <div class="grid">
     {{range .Servers}}
-    <a class="srv-card" href="/server/{{.ID}}">
+    <a class="srv-card" {{if eq .ProductID 2.0}}href="/server/{{.ID}}"{{else}}href="https://datalix.eu/cp/service/{{.ID}}" data-dlg="ext-modal" data-ext="https://datalix.eu/cp/service/{{.ID}}"{{end}}>
       <div>
         <div class="srv-name">{{if .Name}}{{.Name}}{{else}}{{.ProductDisplay}}{{end}}</div>
         <div class="srv-id">{{.ID}}</div>

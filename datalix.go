@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"io"
@@ -98,10 +99,7 @@ func (a API) raw(method, path string, form url.Values) ([]byte, error) {
 			Error string `json:"error"`
 		}
 		json.Unmarshal(data, &e)
-		msg := e.Error
-		if msg == "" {
-			msg = "API error (HTTP " + strconv.Itoa(resp.StatusCode) + ")"
-		}
+		msg := cmp.Or(e.Error, "API error (HTTP "+strconv.Itoa(resp.StatusCode)+")")
 		return nil, &apiError{msg: msg, status: resp.StatusCode}
 	}
 	return data, nil
@@ -139,10 +137,6 @@ type Num float64
 
 func (n *Num) UnmarshalJSON(b []byte) error {
 	s := strings.Trim(string(b), `"`)
-	if s == "" || s == "null" {
-		*n = 0
-		return nil
-	}
 	v, err := strconv.ParseFloat(s, 64)
 	if err != nil {
 		*n = 0
@@ -188,28 +182,23 @@ type Service struct {
 
 type ServiceInfo struct {
 	Display struct {
-		Backup     Flag `json:"backup"`
-		Hardware   Flag `json:"hardware"`
-		IP         Flag `json:"ip"`
-		LiveData   Flag `json:"livedata"`
-		Traffic    Flag `json:"traffic"`
-		Cron       Flag `json:"cron"`
-		DDoSLog    Flag `json:"ddoslog"`
-		CustomISO  Flag `json:"customisomount"`
-		ISOMount   Flag `json:"isomount"`
-		NoVNC      Flag `json:"novnc"`
-		Settings   Flag `json:"settings"`
-		SSHKeys    Flag `json:"sshkeys"`
-		BucketList Flag `json:"bucketlist"`
-		KeyList    Flag `json:"keylist"`
-		LoginPlesk Flag `json:"loginplesk"`
+		Backup    Flag `json:"backup"`
+		Hardware  Flag `json:"hardware"`
+		IP        Flag `json:"ip"`
+		LiveData  Flag `json:"livedata"`
+		Traffic   Flag `json:"traffic"`
+		Cron      Flag `json:"cron"`
+		DDoSLog   Flag `json:"ddoslog"`
+		CustomISO Flag `json:"customisomount"`
+		ISOMount  Flag `json:"isomount"`
+		NoVNC     Flag `json:"novnc"`
+		SSHKeys   Flag `json:"sshkeys"`
 		// per-product gates for the action sidebar
 		ActionButtons Flag `json:"actionbuttons"`
 		LoginData     Flag `json:"logindata"`
 		Renew         Flag `json:"renew"`
 		Rescue        Flag `json:"rescue"`
 		PasswordReset Flag `json:"passwordreset"`
-		Files         Flag `json:"files"`
 	} `json:"display"`
 	Product struct {
 		MAC             string `json:"mac"`
@@ -228,42 +217,11 @@ type ServiceInfo struct {
 		OSType          string `json:"ostype"`
 		TrafficNotify   Num    `json:"trafficnotify"` // 1 = email notifications on
 		ISO             Flag   `json:"iso"`           // an ISO is currently inserted
-		// gameserver extras
-		ModManager    Flag   `json:"modmanager"`
-		IP            string `json:"ip"`
-		Port          Num    `json:"port"`
-		SteamConnect  string `json:"steamconnectstring"`
-		Version       Str    `json:"version"`       // current game version id
-		VersionChange Num    `json:"versionchange"` // 1 = wipes data, 2 = jar swap only
-		GameID        Str    `json:"gameid"`
-		Uplink        Num    `json:"uplink"` // tenths of MB/s (official UI divides by 10)
-		MaxUplink     Num    `json:"maxuplink"`
-		ClusterInfo   struct {
+		Uplink          Num    `json:"uplink"`        // tenths of MB/s (official UI divides by 10)
+		MaxUplink       Num    `json:"maxuplink"`
+		ClusterInfo     struct {
 			DisplayName string `json:"displayname"`
 		} `json:"clusterinfo"`
-		// non-KVM login shapes: webspace/nextcloud send login,
-		// gameservers send sftp + db
-		Login struct {
-			Host     string `json:"host"`
-			Username string `json:"username"`
-			Password string `json:"password"`
-		} `json:"login"`
-		SFTP struct {
-			User     string `json:"user"`
-			Password string `json:"password"`
-			IP       string `json:"ip"`
-			Port     Num    `json:"port"`
-		} `json:"sftp"`
-		DB struct {
-			User          string `json:"user"`
-			Password      string `json:"password"`
-			Host          string `json:"host"`
-			Port          Num    `json:"port"`
-			DB            string `json:"db"`
-			PhpMyAdminURL string `json:"phpmyadminurl"`
-		} `json:"db"`
-		// Nextcloud sends its editable settings inline as a map
-		Settings map[string]Str `json:"settings"`
 	} `json:"product"`
 	Service Service `json:"service"`
 }
@@ -413,41 +371,6 @@ type EmailLogEntry struct {
 	CreatedOn int64  `json:"created_on"`
 }
 
-type Bucket struct {
-	Name    string `json:"name"`
-	Size    Num    `json:"size"` // bytes
-	Objects Num    `json:"objects"`
-}
-
-type S3Key struct {
-	AccessKey string `json:"access_key"`
-	SecretKey string `json:"secret_key"`
-}
-
-type FileEntry struct {
-	Name        string `json:"name"`
-	IsFile      Flag   `json:"is_file"`
-	SizeDisplay string `json:"sizedisplay"`
-	MimeType    string `json:"mimetype"`
-}
-
-type Mod struct {
-	Name    string `json:"name"`
-	Title   string `json:"title"`
-	Summary string `json:"summary"`
-}
-
-type GameVersion struct {
-	ID      Str    `json:"id"`
-	Version string `json:"version"`
-}
-
-type Game struct {
-	ID          Str           `json:"id"`
-	DisplayName string        `json:"displayname"`
-	Versions    []GameVersion `json:"versions"`
-}
-
 // ServiceAddon is an addon already on the service; AddonOffer is orderable.
 type ServiceAddon struct {
 	ID        Str    `json:"id"`
@@ -461,22 +384,6 @@ type AddonOffer struct {
 	Name  string `json:"name"`
 	Price Num    `json:"price"`
 	Once  Flag   `json:"once"` // one-time purchase, not added to the monthly price
-}
-
-type NetPort struct {
-	IP      string `json:"ip"`
-	Port    Num    `json:"port"`
-	Default Flag   `json:"default"`
-}
-
-// GameVariable is one row of GET /service/{id}/settings (gameservers).
-type GameVariable struct {
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	EnvVariable  string `json:"env_variable"`
-	ServerValue  Str    `json:"server_value"`
-	DefaultValue Str    `json:"default_value"`
-	CanEdit      Flag   `json:"canedit"`
 }
 
 type Dashboard struct {
@@ -601,17 +508,11 @@ type CatalogPacket struct {
 	DisplayName string `json:"displayname"`
 	Line        string `json:"line"`
 	Price       Num    `json:"price"`
-	Setup       Num    `json:"setup"`
-	PricePerTB  Num    `json:"pricepertb"`
 	Cores       Str    `json:"cores"`
 	Memory      Num    `json:"memory"`
 	Disk        Num    `json:"disk"`
-	DiskBase    Str    `json:"diskbase"`
-	Storage     Num    `json:"storage"`
 	Traffic     Num    `json:"traffic"`
 	Active      Num    `json:"active"`
-	Stock       Num    `json:"stock"`
-	Status      Num    `json:"status"`
 }
 
 type KVMPacket struct {

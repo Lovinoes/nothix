@@ -149,13 +149,32 @@ func mockDatalix(t *testing.T) *httptest.Server {
 		case r.URL.Path == "/service/"+testKVM:
 			json(w, `{"display":{"ip":true,"hardware":true,"traffic":true,"backup":true,"livedata":true,
 					"cron":true,"ddoslog":true,"customisomount":true,"actionbuttons":true,"logindata":true,
-					"renew":true,"rescue":true,"passwordreset":true},
+					"renew":true,"rescue":true,"passwordreset":true,"sshkeys":true},
 				"product":{"status":"running","hostname":"vm1","node":"node7","location":"Frankfurt",
 					"proxmoxid":123,"trafficnotify":1,"uplink":1000,"maxuplink":3000,
-					"user":"root","password":"rootpw",
+					"user":"root","password":"rootpw","ostype":"linux",
 					"clusterinfo":{"displayname":"EPYC Cluster"}},
 				"service":{"id":"`+testKVM+`","name":"my kvm","price":5.99,"productdisplay":"KVM Server",
-					"productid":2,"expire_at":1790000000,"autorenew":1,"autorenewpayment":"0","attacknotify":0}}`)
+					"productid":2,"expire_at":1790000000,"autorenew":1,"autorenewpayment":"0","attacknotify":0,
+					"addons":true}}`)
+		case r.URL.Path == "/service/"+testKVM+"/hardware":
+			json(w, `{"cores":4,"memory":8192,"disk":163840,"uplink":1000,"traffic":20,
+				"cputype":"AMD EPYC 7443P","hostname":"vm1","storagetype":"NVMe",
+				"ddosprotection":"Advanced","tpm":1,"uefi":0}`)
+		case r.URL.Path == "/service/"+testKVM+"/sshkeys":
+			json(w, `[{"id":"dddddddd-0000-0000-0000-000000000001","displayname":"laptop","key":"ssh-ed25519 AAAAtest user@host"}]`)
+		case r.URL.Path == "/service/"+testKVM+"/addons":
+			json(w, `[{"id":"eeeeeeee-0000-0000-0000-000000000001","name":"Traffic reset","price":2.00,"deletable":1}]`)
+		case r.URL.Path == "/service/"+testKVM+"/addons/list":
+			json(w, `[{"type":"ram","name":"Extra RAM","price":1.50,"once":0}]`)
+		case r.Method == "POST" && r.URL.Path == "/service/"+testKVM+"/addon/order":
+			if r.FormValue("addon") != "ram" || r.FormValue("amount") != "2" ||
+				r.FormValue("paymentmethod") != "paypal" || r.FormValue("tax") != "c-de" {
+				w.WriteHeader(400)
+				json(w, `{"error":"bad addon order"}`)
+				return
+			}
+			json(w, `{"id":"ord-addon"}`)
 		case r.Method == "GET" && r.URL.Path == "/service/"+testKVM+"/cron":
 			json(w, `[{"id":"c1","displayname":"nightly","action":"backup","expression":"0 4 * * *","nextexecute":"2026-08-02 04:00:00"}]`)
 		case r.Method == "POST" && r.URL.Path == "/service/"+testKVM+"/cron":
@@ -187,8 +206,7 @@ func mockDatalix(t *testing.T) *httptest.Server {
 			}
 			json(w, `[]`)
 		case r.URL.Path == "/reseller/packet/list":
-			json(w, `[{"type":"kvmpackage","id":"bbbbbbbb-0000-0000-0000-000000000001","displayname":"KVM S","line":"AMD EPYC","price":4.99,"cores":4,"memory":8192,"disk":163840,"traffic":20,"active":1},
-				{"type":"dedicatedpackage","id":"d1","displayname":"DEDI L","price":30,"setup":15,"stock":0,"traffic":30,"diskbase":"2x1TB"}]`)
+			json(w, `[{"type":"kvmpackage","id":"bbbbbbbb-0000-0000-0000-000000000001","displayname":"KVM S","line":"AMD EPYC","price":4.99,"cores":4,"memory":8192,"disk":163840,"traffic":20,"active":1}]`)
 		case r.URL.Path == "/kvmserver/packet/bbbbbbbb-0000-0000-0000-000000000001":
 			json(w, `{"id":"bbbbbbbb-0000-0000-0000-000000000001","displayname":"KVM S","line":"AMD EPYC","cores":4,"memory":8192,"disk":163840,"uplink":1000,"ipv4":1,"price":4.99,"traffic":20}`)
 		case r.URL.Path == "/kvmserver/packet/bbbbbbbb-0000-0000-0000-000000000001/os":
@@ -203,113 +221,7 @@ func mockDatalix(t *testing.T) *httptest.Server {
 		case r.Method == "POST" && r.URL.Path == "/order/ord-555/pay":
 			json(w, `{"url":"https://pay.example/checkout/555"}`)
 		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002":
-			json(w, `{"display":{"backup":true,"livedata":true,"cron":true,"hardware":true,"settings":true,"sshkeys":true,
-					"actionbuttons":true,"logindata":true,"renew":true,"files":true},
-				"product":{"status":"running","ostype":"linux","modmanager":1,
-					"ip":"5.6.7.8","port":25565,
-					"version":"v1","versionchange":2,"gameid":"g-mc",
-					"sftp":{"user":"gs1","password":"sftppw","ip":"5.6.7.8","port":2022},
-					"db":{"user":"db1","password":"dbpw","host":"db.example","port":3306,"db":"gs1db",
-						"phpmyadminurl":"https://pma.example"}},
-				"service":{"id":"aaaaaaaa-0000-0000-0000-000000000002","name":"null","price":3.99,
-					"productdisplay":"Gameserver","productid":4,"expire_at":1790000000,"addons":true}}`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/hardware":
-			json(w, `{"slots":10,"game":"Minecraft","addons":[{"name":"extra ram","gb":2}]}`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/settings":
-			json(w, `[{"name":"Max Players","description":"Player slots","env_variable":"MAX_PLAYERS",
-				"server_value":"20","default_value":"16","canedit":1}]`)
-		case r.Method == "POST" && r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/settings/variable":
-			if r.FormValue("variable") != "MAX_PLAYERS" || r.FormValue("value") != "32" {
-				w.WriteHeader(400)
-				json(w, `{"error":"bad variable"}`)
-				return
-			}
-			json(w, `[]`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/sshkeys":
-			json(w, `[{"id":"dddddddd-0000-0000-0000-000000000001","displayname":"laptop","key":"ssh-ed25519 AAAAtest user@host"}]`)
-		case r.Method == "POST" && r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/files":
-			if r.FormValue("directory") != "/" {
-				json(w, `[]`)
-				return
-			}
-			json(w, `[{"name":"plugins","is_file":0,"sizedisplay":"-"},
-				{"name":"server.properties","is_file":1,"sizedisplay":"1.2 KB","mimetype":"text/plain"},
-				{"name":"world.zip","is_file":1,"sizedisplay":"120 MB","mimetype":"application/zip"}]`)
-		case r.Method == "GET" && r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/file":
-			if r.URL.Query().Get("filepath") != "/server.properties" {
-				w.WriteHeader(400)
-				json(w, `{"error":"no such file"}`)
-				return
-			}
-			json(w, `{"data":"motd=hello"}`)
-		case r.Method == "POST" && r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/file":
-			if r.FormValue("file") != "/server.properties" || r.FormValue("data") != "motd=changed" {
-				w.WriteHeader(400)
-				json(w, `{"error":"bad save"}`)
-				return
-			}
-			json(w, `[]`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/file/delete":
-			json(w, `[]`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/file/unzip":
-			json(w, `[]`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/file/download":
-			json(w, `{"link":"https://dl.example/server.properties"}`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/mods":
-			json(w, `[{"name":"worldedit","title":"WorldEdit","summary":"In-game map editor","thumbnail":""}]`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/mod/list":
-			if r.FormValue("query") != "essentials" {
-				json(w, `[]`)
-				return
-			}
-			json(w, `[{"name":"essentialsx","title":"EssentialsX","summary":"Core server commands","thumbnail":""}]`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/mod/add":
-			if r.FormValue("mod") != "essentialsx" {
-				w.WriteHeader(400)
-				json(w, `{"error":"bad mod"}`)
-				return
-			}
-			json(w, `[]`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/mod/delete":
-			json(w, `[]`)
-		case r.Method == "GET" && r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/version":
-			json(w, `[{"id":"v1","version":"1.20"},{"id":"v2","version":"1.21"}]`)
-		case r.Method == "POST" && r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/version":
-			if r.FormValue("version") != "v2" {
-				w.WriteHeader(400)
-				json(w, `{"error":"bad version"}`)
-				return
-			}
-			json(w, `[]`)
-		case r.Method == "GET" && r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/gamechanger":
-			json(w, `[{"id":"g-mc","displayname":"Minecraft","versions":[{"id":"v1","version":"1.20"},{"id":"v2","version":"1.21"}]},
-				{"id":"g-rust","displayname":"Rust","versions":[{"id":"r1","version":"latest"}]}]`)
-		case r.Method == "POST" && r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/gamechanger":
-			if r.FormValue("game") != "g-rust" || r.FormValue("version") != "r1" {
-				w.WriteHeader(400)
-				json(w, `{"error":"bad game"}`)
-				return
-			}
-			json(w, `[]`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/networkdata":
-			json(w, `[{"ip":"5.6.7.8","port":25565,"default":1},{"ip":"5.6.7.8","port":25570,"default":0}]`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/extraport":
-			json(w, `[]`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/sftp/reset",
-			r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/db/reset":
-			json(w, `[]`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/addons":
-			json(w, `[{"id":"eeeeeeee-0000-0000-0000-000000000001","name":"Traffic reset","price":2.00,"deletable":1}]`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/addons/list":
-			json(w, `[{"type":"ram","name":"Extra RAM","price":1.50,"max":4,"once":0}]`)
-		case r.Method == "POST" && r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000002/addon/order":
-			if r.FormValue("addon") != "ram" || r.FormValue("amount") != "2" ||
-				r.FormValue("paymentmethod") != "paypal" || r.FormValue("tax") != "c-de" {
-				w.WriteHeader(400)
-				json(w, `{"error":"bad addon order"}`)
-				return
-			}
-			json(w, `{"id":"ord-addon"}`)
+			json(w, `{"service":{"id":"aaaaaaaa-0000-0000-0000-000000000002","productdisplay":"Gameserver","productid":4}}`)
 		case r.Method == "POST" && r.URL.Path == "/order/ord-addon/pay":
 			json(w, `{"url":"https://pay.example/checkout/addon"}`)
 		case r.Method == "GET" && r.URL.Path == "/service/"+testKVM+"/upgrade":
@@ -323,22 +235,6 @@ func mockDatalix(t *testing.T) *httptest.Server {
 			json(w, `{"id":"ord-upg"}`)
 		case r.Method == "POST" && r.URL.Path == "/order/ord-upg/pay":
 			json(w, `{"url":"https://pay.example/checkout/upg"}`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000007":
-			json(w, `{"display":{"hardware":true,"bucketlist":true,"keylist":true,"renew":true},
-				"product":{"status":"running"},
-				"service":{"id":"aaaaaaaa-0000-0000-0000-000000000007","name":"backup bucket","price":2.99,
-					"productdisplay":"Object Storage","productid":7,"expire_at":1790000000}}`)
-		case r.Method == "POST" && r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000007/buckets":
-			if r.FormValue("name") != "my-bucket" {
-				w.WriteHeader(400)
-				json(w, `{"error":"bad bucket name"}`)
-				return
-			}
-			json(w, `[]`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000007/buckets":
-			json(w, `[{"name":"backups","size":5300000000,"objects":42}]`)
-		case r.URL.Path == "/service/aaaaaaaa-0000-0000-0000-000000000007/keys":
-			json(w, `[{"access_key":"AKtest123","secret_key":"SEKRIT456"}]`)
 		case r.URL.Path == "/support/ticket/4821":
 			json(w, `{"id":4821,"title":"Server unreachable","created_on":1753800000,
 				"status":{"text":"Answered","bgcolor":"lime-600"},
@@ -387,6 +283,10 @@ func mockDatalix(t *testing.T) *httptest.Server {
 			json(w, `[]`)
 		case r.URL.Path == "/user/"+testUID+"/email/log":
 			json(w, `[{"id":"ffffffff-0000-0000-0000-000000000001","header":"Order #1234 confirmed","template":"Order","created_on":1718000000,"send":1}]`)
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/traffic"):
+			json(w, `{"max":20,"current":3.5,"history":{
+				"last30days":[{"date":"2026-07-31","in":1024,"out":512}],
+				"months":[{"date":"2026-06","in":2048,"out":1024}]}}`)
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/status"):
 			json(w, `{"status":"running"}`)
 		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/livedata"):
@@ -472,8 +372,12 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 	if !strings.Contains(body, "my kvm") {
 		t.Fatalf("overview missing KVM server; body:\n%s", body)
 	}
-	want(body, "Gameserver", `href="/server/aaaaaaaa-0000-0000-0000-000000000002"`)
-	want(body, "Dedicated Server", "Webspace", "Nextcloud", "Colocation", "Object Storage", "IP Subnet")
+	// non-KVM cards open the official-panel popup instead of /server/…
+	want(body, "Gameserver", `data-ext="https://datalix.eu/cp/service/aaaaaaaa-0000-0000-0000-000000000002"`)
+	if strings.Contains(body, `href="/server/aaaaaaaa-0000-0000-0000-000000000002"`) {
+		t.Fatal("non-KVM service links to the internal server page")
+	}
+	want(body, "Dedicated Server", "Webspace", "Nextcloud", "Colocation", "Object Storage", "IP Subnet", "ext-modal")
 	if !strings.Contains(body, "483920") {
 		t.Fatal("support pin not rendered")
 	}
@@ -487,28 +391,17 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 
 	// service overview page: KVM row manageable, non-KVM row not
 	body = get("/services")
-	want(body, "my kvm", "Gameserver")
-	if !strings.Contains(body, "/server/aaaaaaaa-0000-0000-0000-000000000001") {
-		t.Fatal("services page missing manage link for KVM")
-	}
-	if !strings.Contains(body, `href="/server/aaaaaaaa-0000-0000-0000-000000000002"`) {
-		t.Fatal("services page missing manage link for non-KVM service")
-	}
+	want(body, "my kvm", "Gameserver", "/server/aaaaaaaa-0000-0000-0000-000000000001",
+		`data-ext="https://datalix.eu/cp/service/aaaaaaaa-0000-0000-0000-000000000002"`)
 
 	// ticket overview renders the undocumented ticket-list endpoint
 	body = get("/tickets")
-	want(body, "Server unreachable", "4821")
-	if !strings.Contains(body, "Answered") {
-		t.Fatal("ticket status badge missing")
-	}
+	want(body, "Server unreachable", "4821", "Answered")
 
 	// orders page: paginated shape decoded, HTML stripped, pager rendered
 	body = get("/orders")
-	want(body, "KVM package", "Completed")
-	if !strings.Contains(body, "Price: 4.95 € · Period: 30 days") {
-		t.Fatal("orderInfo HTML not converted to plain text")
-	}
-	if !strings.Contains(body, "/orders?start=10") || strings.Contains(body, "previous") {
+	want(body, "KVM package", "Completed", "Price: 4.95 € · Period: 30 days", "/orders?start=10")
+	if strings.Contains(body, "previous") {
 		t.Fatal("pagination wrong: want next link only on first page")
 	}
 
@@ -554,16 +447,13 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 	flash("/affiliate/create", "Affiliate link created.", url.Values{"name": {"partner"}})
 	flash("/affiliate/delete", "Affiliate link deleted.", url.Values{"id": {"7c1d2e3f-0a5b-4c6d-8e9f-1a2b3c4d5e6f"}})
 
+	// settings general tab renders the shared invoice-data partial
+	want(get("/settings"), `id="pay-country"`, `Germany — 19%`, `value="Max"`)
+
 	// top up credit page: method cards, modal, prefilled invoice data
 	body = get("/credit")
-	want(body, `data-method="paypal"`, `data-method="cryptocurrency-xmr"`)
-	if !strings.Contains(body, `src="/static/payment/paypal.png"`) {
-		t.Fatal("credit page missing payment method icons")
-	}
-	want(body, `id="pay-modal"`, `Germany — 19%`)
-	if !strings.Contains(body, `value="Max"`) {
-		t.Fatal("credit page invoice data not prefilled")
-	}
+	want(body, `data-method="paypal"`, `data-method="cryptocurrency-xmr"`, `src="/static/payment/paypal.png"`)
+	want(body, `id="pay-modal"`, `Germany — 19%`, `value="Max"`)
 
 	// top-up round-trip: credit/add → order pay → redirect to provider
 	noRedir := &http.Client{Jar: jar, CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -579,30 +469,13 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 		readBody(t, resp)
 		return resp.Header.Get("Location")
 	}
-	resp, err = noRedir.PostForm(panel.URL+"/credit/topup", url.Values{
-		"csrf": {sessCSRF}, "method": {"paypal"}, "amount": {"25"},
-		"tos": {"1"}, "privacy": {"1"}, "norefund": {"1"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	readBody(t, resp)
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("topup: want 303, got %d", resp.StatusCode)
-	}
-	if loc := resp.Header.Get("Location"); loc != "https://pay.example/checkout/777" {
+	if loc := postLoc("/credit/topup", url.Values{"method": {"paypal"}, "amount": {"25"},
+		"tos": {"1"}, "privacy": {"1"}, "norefund": {"1"}}); loc != "https://pay.example/checkout/777" {
 		t.Fatalf("topup redirect: got %q", loc)
 	}
 
 	// topup without the consents → bounced back with an error, no API call
-	resp, err = noRedir.PostForm(panel.URL+"/credit/topup", url.Values{
-		"csrf": {sessCSRF}, "method": {"paypal"}, "amount": {"25"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	readBody(t, resp)
-	if loc := resp.Header.Get("Location"); !strings.HasPrefix(loc, "/credit?err=") {
+	if loc := postLoc("/credit/topup", url.Values{"method": {"paypal"}, "amount": {"25"}}); !strings.HasPrefix(loc, "/credit?err=") {
 		t.Fatalf("topup without consents should flash an error, got %q", loc)
 	}
 
@@ -635,6 +508,15 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 		"name": {"weekly"}, "expression": {"0 5 * * *"}, "action": {"backup"},
 	})
 
+	// hardware tab decodes straight into Hardware (no per-product fallback)
+	body = get("/server/" + testKVM + "?tab=hardware")
+	want(body, "AMD EPYC 7443P", "NVMe", "Advanced", "EPYC Cluster", "node7")
+
+	// traffic tab: both bar charts render through the shared "bars" partial
+	body = get("/server/" + testKVM + "?tab=traffic")
+	want(body, "Last 30 days", "Month view", `title="2026-07-31 — in 1.00 GB · out 0.50 GB"`,
+		`title="2026-06 — in 2.00 GB · out 1.00 GB"`, `<i class="in" style="height:100%">`)
+
 	// ddos tab: incident row + pagination
 	body = get("/server/" + testKVM + "?tab=ddos")
 	want(body, "UDP flood", "showing 0–10 of 25")
@@ -644,15 +526,11 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 		"ip": {"1.2.3.4"}, "status": {"permanent"},
 	})
 
-	// order catalog: kvm orderable, dedicated shown as sold out / external
-	body = get("/order")
-	want(body, "KVM S", `href="/order/bbbbbbbb-0000-0000-0000-000000000001"`)
-	want(body, "DEDI L", "sold out")
+	// order catalog: kvm packages only, orderable
+	want(get("/order"), "KVM S", `href="/order/bbbbbbbb-0000-0000-0000-000000000001"`)
 
 	// order config page renders the OS list
-	if body = get("/order/bbbbbbbb-0000-0000-0000-000000000001"); !strings.Contains(body, "Debian 12") {
-		t.Fatal("order config missing OS list")
-	}
+	want(get("/order/bbbbbbbb-0000-0000-0000-000000000001"), "Debian 12")
 
 	// placing the order forwards to the payment provider
 	if loc := postLoc("/order/bbbbbbbb-0000-0000-0000-000000000001", url.Values{
@@ -664,11 +542,7 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 
 	// access manager: code + both lists render, create/accept round-trip
 	body = get("/access")
-	if !strings.Contains(body, "ACCESS-CODE-99") {
-		t.Fatal("access code not rendered")
-	}
-	want(body, "buddy", "team access")
-	want(body, "Start server", `value="start" checked`)
+	want(body, "ACCESS-CODE-99", "buddy", "team access", "Start server", `value="start" checked`)
 	// webspace (productid 3) cannot be shared and must be missing from the create dropdown
 	if strings.Contains(body, `value="aaaaaaaa-0000-0000-0000-000000000004"`) {
 		t.Fatal("webspace service must not be offered in the access create dialog")
@@ -683,86 +557,36 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 	flash("/access/accept", "Access request accepted", url.Values{"id": {"eeeeeeee-0000-0000-0000-000000000002"}})
 
 	// emaillog renders the sent-mail list
-	if body = get("/emaillog"); !strings.Contains(body, "Order #1234 confirmed") {
-		t.Fatal("emaillog missing entries")
-	}
+	want(get("/emaillog"), "Order #1234 confirmed")
 
-	// non-KVM services are manageable: gameserver page shows SFTP/DB login data
+	// non-KVM services bounce to the services list with an official-panel notice
 	body = get("/server/aaaaaaaa-0000-0000-0000-000000000002")
-	want(body, "gs1", "sftppw", "db.example")
-	// generic key/value hardware view for non-KVM shapes
-	body = get("/server/aaaaaaaa-0000-0000-0000-000000000002?tab=hardware")
-	want(body, "Minecraft", "extra ram")
-
-	// gameserver variables tab renders and saving a value round-trips
-	body = get("/server/aaaaaaaa-0000-0000-0000-000000000002?tab=vars")
-	want(body, "MAX_PLAYERS", `value="20"`)
-	flash("/server/aaaaaaaa-0000-0000-0000-000000000002/var", "Variable saved", url.Values{"variable": {"MAX_PLAYERS"}, "value": {"32"}})
-
-	// object storage: buckets and S3 keys tabs, bucket create round-trips
-	body = get("/server/aaaaaaaa-0000-0000-0000-000000000007?tab=buckets")
-	want(body, "backups.s3.fra.databucket.eu", "5.30 GB")
-	// display flags gate the action sidebar per product: object storage has no
-	// power buttons / reinstall / login data, gameservers have no noVNC or rescue
-	if strings.Contains(body, `value="start"`) || strings.Contains(body, "reinstall") ||
-		strings.Contains(body, "Login data") {
-		t.Fatal("object storage page shows actions it should not have")
+	want(body, "official Datalix panel")
+	if strings.Contains(body, `value="start"`) {
+		t.Fatal("non-KVM service rendered a management page")
 	}
-	body = get("/server/aaaaaaaa-0000-0000-0000-000000000002")
-	if strings.Contains(body, "noVNC") || strings.Contains(body, "rescue mode") {
-		t.Fatal("gameserver page shows KVM-only actions")
-	}
-	want(body, `value="start"`, `value="restart"`)
-	flash("/server/aaaaaaaa-0000-0000-0000-000000000007/bucket", "Bucket created", url.Values{"name": {"my-bucket"}})
-	body = get("/server/aaaaaaaa-0000-0000-0000-000000000007?tab=keys")
-	want(body, "AKtest123", `class="blur">SEKRIT456`)
 
 	// IPv4 rDNS reset computes the default in-addr.arpa entry server-side
 	flash("/server/"+testKVM+"/rdns", "rDNS updated", url.Values{"ip": {"1.2.3.4"}, "rdns": {""}, "reset": {"1"}})
 
-	// files tab: listing, text-file view + save round-trip
-	body = get("/server/aaaaaaaa-0000-0000-0000-000000000002?tab=files")
-	want(body, "server.properties", "world.zip", "upload via the official panel")
-	if body = get("/server/aaaaaaaa-0000-0000-0000-000000000002?tab=files&file=/server.properties"); !strings.Contains(body, "motd=hello") {
-		t.Fatal("file content not shown")
-	}
-	flash("/server/aaaaaaaa-0000-0000-0000-000000000002/file/save", "File saved", url.Values{"path": {"/server.properties"}, "data": {"motd=changed"}})
-
-	// mods: installed list, search, add round-trip
-	if body = get("/server/aaaaaaaa-0000-0000-0000-000000000002?tab=mods"); !strings.Contains(body, "WorldEdit") {
-		t.Fatal("installed mods not rendered")
-	}
-	if body = get("/server/aaaaaaaa-0000-0000-0000-000000000002?tab=mods&q=essentials"); !strings.Contains(body, "EssentialsX") {
-		t.Fatal("mod search not rendered")
-	}
-	flash("/server/aaaaaaaa-0000-0000-0000-000000000002/mod/add", "Mod added", url.Values{"mod": {"essentialsx"}})
-
-	// vars tab carries version + game changer for gameservers; console fallback modal present
-	body = get("/server/aaaaaaaa-0000-0000-0000-000000000002?tab=vars")
-	want(body, "change version", "change game", "1.21", "console-modal")
-	flash("/server/aaaaaaaa-0000-0000-0000-000000000002/version", "Version change started", url.Values{"version": {"v2"}, "confirm": {"yes"}})
-	flash("/server/aaaaaaaa-0000-0000-0000-000000000002/game", "Game change started", url.Values{"game": {"g-rust"}, "version": {"r1"}, "confirm": {"yes"}})
-
-	// ports tab
-	body = get("/server/aaaaaaaa-0000-0000-0000-000000000002?tab=ports")
-	want(body, "25565", "add extra port")
-
-	// addons tab + order checkout redirect; KVM upgrade checkout redirect
-	body = get("/server/aaaaaaaa-0000-0000-0000-000000000002?tab=addons")
+	// KVM addons tab + order checkout redirect; KVM upgrade checkout redirect
+	body = get("/server/" + testKVM + "?tab=addons")
 	want(body, "Traffic reset", "Extra RAM")
-	if loc := postLoc("/server/aaaaaaaa-0000-0000-0000-000000000002/addon/order", url.Values{
+	if loc := postLoc("/server/"+testKVM+"/addon/order", url.Values{
 		"addon": {"ram"}, "amount": {"2"}, "method": {"paypal"}, "credit": {"1"},
 	}); loc != "https://pay.example/checkout/addon" {
 		t.Fatalf("addon order redirect: got %q", loc)
 	}
-	if body = get("/server/" + testKVM + "?tab=billing"); !strings.Contains(body, "KVM M — 9.99") {
-		t.Fatal("upgrade offer not rendered on billing tab")
-	}
+	want(get("/server/"+testKVM+"?tab=billing"), "KVM M — 9.99")
 	if loc := postLoc("/server/"+testKVM+"/upgrade", url.Values{
 		"package": {"up-m"}, "method": {"paypal"}, "credit": {"1"},
 	}); loc != "https://pay.example/checkout/upg" {
 		t.Fatalf("upgrade order redirect: got %q", loc)
 	}
+
+	// service SSH keys tab (linux KVM) renders
+	body = get("/server/" + testKVM + "?tab=sshkeys")
+	want(body, "laptop", "ssh-ed25519")
 
 	// ticket thread renders, internal notes stay hidden, answering round-trips
 	body = get("/tickets/4821")
