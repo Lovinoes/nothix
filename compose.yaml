@@ -1,0 +1,20 @@
+services:
+  nothix:
+    image: ghcr.io/lovinoes/nothix:latest
+    container_name: nothix
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8480:8480"
+    environment:
+      PANEL_ADDR: 0.0.0.0:8480    # inside the container, not on your host
+      TZ: Europe/Berlin           # only affects the dashboard greeting
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+    # driver pinned on purpose: max-size/max-file are json-file options and the
+    # daemon rejects them outright if the host defaults to journald or syslog.
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: "3" }

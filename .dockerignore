@@ -1,0 +1,4 @@
+# Allowlist: the build needs the module file and the source tree, nothing else.
+*
+!go.mod
+!src

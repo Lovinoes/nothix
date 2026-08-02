@@ -19,7 +19,7 @@ import (
 
 // demoMode serves the panel against the mock API for manual clicking:
 //
-//	go test -run TestDemoServer -timeout 0 -demo
+//	go test -C src -run TestDemoServer -timeout 0 -demo
 //
 // then log in at http://127.0.0.1:8481 with testKey.
 var demoMode = flag.Bool("demo", false, "serve the demo panel on :8481 instead of testing")
