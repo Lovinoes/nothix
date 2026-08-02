@@ -19,7 +19,7 @@
         <td>{{if eq .Active 1.0}}<span class="chip ok">available</span>{{else}}<span class="chip err">sold out</span>{{end}}</td>
         <td><strong>{{printf "%.2f" .Price}} €</strong>/mo</td>
         <td class="mono-sm">{{.Cores}} cores · {{gb .Memory}} GiB memory · {{gb .Disk}} GiB disk · {{printf "%.0f" .Traffic}} TB traffic</td>
-        <td style="text-align:right">{{if eq .Active 1.0}}<a class="btn btn-primary" href="/order/{{.ID}}">order</a>{{end}}</td>
+        <td class="r">{{if eq .Active 1.0}}<a class="btn btn-primary" href="/order/{{.ID}}">order</a>{{end}}</td>
       </tr>
       {{end}}
 
@@ -30,7 +30,7 @@
         <td>{{if eq .Stock 0.0}}<span class="chip err">sold out</span>{{else}}<span class="chip ok">available</span>{{end}}</td>
         <td><strong>{{printf "%.2f" .Price}} €</strong>/mo{{if .Setup}}<br><span class="mono-sm">+ {{printf "%.2f" .Setup}} € setup</span>{{end}}</td>
         <td class="mono-sm">{{if .DiskBase}}Disk base {{.DiskBase}} · {{end}}{{printf "%.0f" .Traffic}} TB traffic</td>
-        <td style="text-align:right"><a class="btn" href="https://datalix.eu" rel="noopener noreferrer">datalix.eu ↗</a></td>
+        <td class="r"><a class="btn" href="https://datalix.eu" rel="noopener noreferrer">datalix.eu ↗</a></td>
       </tr>
       {{end}}
 
@@ -41,7 +41,7 @@
         <td>{{if eq .Status 1.0}}<span class="chip ok">available</span>{{else}}<span class="chip err">sold out</span>{{end}}</td>
         <td><strong>{{printf "%.2f" .Price}} €</strong>/mo</td>
         <td class="mono-sm">{{printf "%.0f" .Storage}} GB storage · {{printf "%.0f" .Traffic}} GB traffic</td>
-        <td style="text-align:right"><a class="btn" href="https://datalix.eu" rel="noopener noreferrer">datalix.eu ↗</a></td>
+        <td class="r"><a class="btn" href="https://datalix.eu" rel="noopener noreferrer">datalix.eu ↗</a></td>
       </tr>
       {{end}}
 
@@ -52,7 +52,7 @@
         <td><span class="chip ok">available</span></td>
         <td><strong>{{printf "%.2f" .PricePerTB}} €</strong>/TB</td>
         <td class="mono-sm">unlimited incoming traffic</td>
-        <td style="text-align:right"><a class="btn" href="https://datalix.eu" rel="noopener noreferrer">datalix.eu ↗</a></td>
+        <td class="r"><a class="btn" href="https://datalix.eu" rel="noopener noreferrer">datalix.eu ↗</a></td>
       </tr>
       {{end}}
 

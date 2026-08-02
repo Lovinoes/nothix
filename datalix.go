@@ -23,8 +23,8 @@ var apiHTTP = &http.Client{Timeout: 20 * time.Second}
 
 type API struct{ token string }
 
-func (a API) get(path string, out any) error    { return a.do(http.MethodGet, path, nil, out) }
-func (a API) delete(path string) error          { return a.do(http.MethodDelete, path, nil, nil) }
+func (a API) get(path string, out any) error { return a.do(http.MethodGet, path, nil, out) }
+func (a API) delete(path string) error       { return a.do(http.MethodDelete, path, nil, nil) }
 func (a API) post(path string, form map[string]string) error {
 	return a.do(http.MethodPost, path, toValues(form), nil)
 }
@@ -60,11 +60,7 @@ func (a API) do(method, path string, form url.Values, out any) error {
 
 // raw performs the request and returns the response body undecoded.
 func (a API) raw(method, path string, form url.Values) ([]byte, error) {
-	sep := "?"
-	if strings.Contains(path, "?") {
-		sep = "&"
-	}
-	u := apiBase + path + sep + "token=" + url.QueryEscape(a.token)
+	u := apiBase + path + flashSep(path) + "token=" + url.QueryEscape(a.token)
 
 	var body io.Reader
 	contentType := ""
@@ -110,9 +106,6 @@ func (a API) raw(method, path string, form url.Values) ([]byte, error) {
 	}
 	return data, nil
 }
-
-// getRaw fetches path and returns the raw body (e.g. an invoice PDF).
-func (a API) getRaw(path string) ([]byte, error) { return a.raw(http.MethodGet, path, nil) }
 
 type apiError struct {
 	msg    string
@@ -190,20 +183,33 @@ type Service struct {
 	AutoRenew        Flag   `json:"autorenew"`
 	AutoRenewPayment Str    `json:"autorenewpayment"` // "0" = off, otherwise the payment method
 	AttackNotify     Flag   `json:"attacknotify"`
+	Addons           Flag   `json:"addons"` // addon tab available
 }
 
 type ServiceInfo struct {
 	Display struct {
-		Backup    Flag `json:"backup"`
-		Hardware  Flag `json:"hardware"`
-		IP        Flag `json:"ip"`
-		LiveData  Flag `json:"livedata"`
-		Traffic   Flag `json:"traffic"`
-		Cron      Flag `json:"cron"`
-		DDoSLog   Flag `json:"ddoslog"`
-		CustomISO Flag `json:"customisomount"`
-		ISOMount  Flag `json:"isomount"`
-		NoVNC     Flag `json:"novnc"`
+		Backup     Flag `json:"backup"`
+		Hardware   Flag `json:"hardware"`
+		IP         Flag `json:"ip"`
+		LiveData   Flag `json:"livedata"`
+		Traffic    Flag `json:"traffic"`
+		Cron       Flag `json:"cron"`
+		DDoSLog    Flag `json:"ddoslog"`
+		CustomISO  Flag `json:"customisomount"`
+		ISOMount   Flag `json:"isomount"`
+		NoVNC      Flag `json:"novnc"`
+		Settings   Flag `json:"settings"`
+		SSHKeys    Flag `json:"sshkeys"`
+		BucketList Flag `json:"bucketlist"`
+		KeyList    Flag `json:"keylist"`
+		LoginPlesk Flag `json:"loginplesk"`
+		// per-product gates for the action sidebar
+		ActionButtons Flag `json:"actionbuttons"`
+		LoginData     Flag `json:"logindata"`
+		Renew         Flag `json:"renew"`
+		Rescue        Flag `json:"rescue"`
+		PasswordReset Flag `json:"passwordreset"`
+		Files         Flag `json:"files"`
 	} `json:"display"`
 	Product struct {
 		MAC             string `json:"mac"`
@@ -218,13 +224,46 @@ type ServiceInfo struct {
 		ConfigChanged   Flag   `json:"configchanged"`
 		TrafficLimitHit Flag   `json:"trafficlimitreached"`
 		PortBlock       Flag   `json:"portblock"`
+		CanUnlockPorts  Flag   `json:"canunlockports"`
+		OSType          string `json:"ostype"`
 		TrafficNotify   Num    `json:"trafficnotify"` // 1 = email notifications on
 		ISO             Flag   `json:"iso"`           // an ISO is currently inserted
-		Uplink          Num    `json:"uplink"`        // tenths of MB/s (official UI divides by 10)
-		MaxUplink       Num    `json:"maxuplink"`
-		ClusterInfo     struct {
+		// gameserver extras
+		ModManager    Flag   `json:"modmanager"`
+		IP            string `json:"ip"`
+		Port          Num    `json:"port"`
+		SteamConnect  string `json:"steamconnectstring"`
+		Version       Str    `json:"version"`       // current game version id
+		VersionChange Num    `json:"versionchange"` // 1 = wipes data, 2 = jar swap only
+		GameID        Str    `json:"gameid"`
+		Uplink        Num    `json:"uplink"` // tenths of MB/s (official UI divides by 10)
+		MaxUplink     Num    `json:"maxuplink"`
+		ClusterInfo   struct {
 			DisplayName string `json:"displayname"`
 		} `json:"clusterinfo"`
+		// non-KVM login shapes: webspace/nextcloud send login,
+		// gameservers send sftp + db
+		Login struct {
+			Host     string `json:"host"`
+			Username string `json:"username"`
+			Password string `json:"password"`
+		} `json:"login"`
+		SFTP struct {
+			User     string `json:"user"`
+			Password string `json:"password"`
+			IP       string `json:"ip"`
+			Port     Num    `json:"port"`
+		} `json:"sftp"`
+		DB struct {
+			User          string `json:"user"`
+			Password      string `json:"password"`
+			Host          string `json:"host"`
+			Port          Num    `json:"port"`
+			DB            string `json:"db"`
+			PhpMyAdminURL string `json:"phpmyadminurl"`
+		} `json:"db"`
+		// Nextcloud sends its editable settings inline as a map
+		Settings map[string]Str `json:"settings"`
 	} `json:"product"`
 	Service Service `json:"service"`
 }
@@ -298,6 +337,8 @@ type CronJob struct {
 	Action      string `json:"action"`
 	Expression  string `json:"expression"`
 	NextExecute string `json:"nextexecute"`
+	NotifyDone  Flag   `json:"emailnotifyonfinish"`
+	NotifyFail  Flag   `json:"emailnotifyonfailure"`
 }
 
 type IncidentsPage struct {
@@ -370,7 +411,72 @@ type EmailLogEntry struct {
 	Header    string `json:"header"`
 	Template  string `json:"template"`
 	CreatedOn int64  `json:"created_on"`
-	Send      Flag   `json:"send"`
+}
+
+type Bucket struct {
+	Name    string `json:"name"`
+	Size    Num    `json:"size"` // bytes
+	Objects Num    `json:"objects"`
+}
+
+type S3Key struct {
+	AccessKey string `json:"access_key"`
+	SecretKey string `json:"secret_key"`
+}
+
+type FileEntry struct {
+	Name        string `json:"name"`
+	IsFile      Flag   `json:"is_file"`
+	SizeDisplay string `json:"sizedisplay"`
+	MimeType    string `json:"mimetype"`
+}
+
+type Mod struct {
+	Name    string `json:"name"`
+	Title   string `json:"title"`
+	Summary string `json:"summary"`
+}
+
+type GameVersion struct {
+	ID      Str    `json:"id"`
+	Version string `json:"version"`
+}
+
+type Game struct {
+	ID          Str           `json:"id"`
+	DisplayName string        `json:"displayname"`
+	Versions    []GameVersion `json:"versions"`
+}
+
+// ServiceAddon is an addon already on the service; AddonOffer is orderable.
+type ServiceAddon struct {
+	ID        Str    `json:"id"`
+	Name      string `json:"name"`
+	Price     Num    `json:"price"`
+	Deletable Flag   `json:"deletable"`
+}
+
+type AddonOffer struct {
+	Type  Str    `json:"type"`
+	Name  string `json:"name"`
+	Price Num    `json:"price"`
+	Once  Flag   `json:"once"` // one-time purchase, not added to the monthly price
+}
+
+type NetPort struct {
+	IP      string `json:"ip"`
+	Port    Num    `json:"port"`
+	Default Flag   `json:"default"`
+}
+
+// GameVariable is one row of GET /service/{id}/settings (gameservers).
+type GameVariable struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	EnvVariable  string `json:"env_variable"`
+	ServerValue  Str    `json:"server_value"`
+	DefaultValue Str    `json:"default_value"`
+	CanEdit      Flag   `json:"canedit"`
 }
 
 type Dashboard struct {
@@ -506,7 +612,6 @@ type CatalogPacket struct {
 	Active      Num    `json:"active"`
 	Stock       Num    `json:"stock"`
 	Status      Num    `json:"status"`
-	Location    string `json:"location"`
 }
 
 type KVMPacket struct {
@@ -516,11 +621,8 @@ type KVMPacket struct {
 	Cores       int    `json:"cores"`
 	Memory      int    `json:"memory"`
 	Disk        int    `json:"disk"`
-	Uplink      int    `json:"uplink"`
 	IPv4        int    `json:"ipv4"`
-	Active      Num    `json:"active"`
 	Price       Num    `json:"price"`
-	Traffic     Num    `json:"traffic"`
 }
 
 type SSHKey struct {
@@ -531,13 +633,13 @@ type SSHKey struct {
 }
 
 type InvoiceData struct {
-	FirstName          string `json:"firstname"`
-	LastName           string `json:"lastname"`
-	Company            string `json:"company"`
-	Street             string `json:"street"`
-	Zip                string `json:"zip"`
-	City               string `json:"city"`
-	Country            Str    `json:"country"`
+	FirstName string `json:"firstname"`
+	LastName  string `json:"lastname"`
+	Company   string `json:"company"`
+	Street    string `json:"street"`
+	Zip       string `json:"zip"`
+	City      string `json:"city"`
+	Country   Str    `json:"country"`
 }
 
 type UserCountry struct {
@@ -571,6 +673,25 @@ type Ticket struct {
 		Text    string `json:"text"`
 		BGColor string `json:"bgcolor"`
 	} `json:"status"`
+}
+
+// TicketDetail mirrors the reseller ticket-details shape on the undocumented
+// customer endpoint GET /support/ticket/{id}.
+type TicketDetail struct {
+	Title  string `json:"title"`
+	Status struct {
+		Text    string `json:"text"`
+		BGColor string `json:"bgcolor"`
+	} `json:"status"`
+	Answers []struct {
+		Content   string `json:"content"` // the API replaces \n with <br>
+		CreatedOn int64  `json:"created_on"`
+		Admin     Flag   `json:"admin"`
+		Internal  Flag   `json:"internal"`
+		Author    struct {
+			Username string `json:"username"`
+		} `json:"author"`
+	} `json:"answers"`
 }
 
 type NotificationSetting struct {

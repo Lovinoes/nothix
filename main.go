@@ -14,10 +14,12 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -55,11 +57,8 @@ func newSession(token, userID, username string) (id string) {
 	id = randHex()
 	sessMu.Lock()
 	defer sessMu.Unlock()
-	for k, v := range sessions { // prune expired while we're here
-		if time.Now().After(v.expires) {
-			delete(sessions, k)
-		}
-	}
+	// prune expired while we're here
+	maps.DeleteFunc(sessions, func(_ string, v *session) bool { return time.Now().After(v.expires) })
 	sessions[id] = &session{token: token, userID: userID, username: username,
 		csrf: randHex(), expires: time.Now().Add(sessionTTL)}
 	return
@@ -94,7 +93,7 @@ func dropSession(w http.ResponseWriter, r *http.Request) {
 func setSessionCookie(w http.ResponseWriter, r *http.Request, id string) {
 	http.SetCookie(w, &http.Cookie{
 		Name: "dpsess", Value: id, Path: "/",
-		MaxAge: int(sessionTTL.Seconds()),
+		MaxAge:   int(sessionTTL.Seconds()),
 		HttpOnly: true, SameSite: http.SameSiteStrictMode,
 		Secure: isHTTPS(r),
 	})
@@ -107,8 +106,8 @@ func isHTTPS(r *http.Request) bool {
 /* ── login rate limiting ── */
 
 var (
-	loginMu    sync.Mutex
-	loginHits  = map[string][]time.Time{}
+	loginMu   sync.Mutex
+	loginHits = map[string][]time.Time{}
 )
 
 // allowLogin permits 5 attempts per 5 minutes per client IP.
@@ -120,12 +119,7 @@ func allowLogin(remoteAddr string) bool {
 	now := time.Now()
 	loginMu.Lock()
 	defer loginMu.Unlock()
-	keep := loginHits[ip][:0]
-	for _, t := range loginHits[ip] {
-		if now.Sub(t) < 5*time.Minute {
-			keep = append(keep, t)
-		}
-	}
+	keep := slices.DeleteFunc(loginHits[ip], func(t time.Time) bool { return now.Sub(t) >= 5*time.Minute })
 	if len(keep) >= 5 {
 		loginHits[ip] = keep
 		return false
@@ -162,11 +156,7 @@ func cached(token, key string, ttl time.Duration, fill func() ([]byte, error)) (
 		return nil, err
 	}
 	cacheMu.Lock()
-	for ck, cv := range cache {
-		if time.Now().After(cv.exp) {
-			delete(cache, ck)
-		}
-	}
+	maps.DeleteFunc(cache, func(_ string, cv cacheEntry) bool { return time.Now().After(cv.exp) })
 	cache[k] = cacheEntry{data: data, exp: time.Now().Add(ttl)}
 	cacheMu.Unlock()
 	return data, nil
@@ -174,16 +164,18 @@ func cached(token, key string, ttl time.Duration, fill func() ([]byte, error)) (
 
 /* ── templates ── */
 
+func fmtTS(ts int64, layout string) string {
+	if ts <= 0 {
+		return "—"
+	}
+	return time.Unix(ts, 0).UTC().Format(layout)
+}
+
 var tmplFuncs = template.FuncMap{
-	"fmtUnix": func(ts int64) string {
-		if ts <= 0 {
-			return "—"
-		}
-		return time.Unix(ts, 0).UTC().Format("02.01.2006")
-	},
-	"gib":   func(mb int) string { return fmt.Sprintf("%g", float64(mb)/1024) },
-	"gb":    func(mb Num) string { return fmt.Sprintf("%.2f", float64(mb)/1024) },
-	"isKVM": isKVM,
+	"fmtUnix": func(ts int64) string { return fmtTS(ts, "02.01.2006") },
+	"gib":     func(mb int) string { return fmt.Sprintf("%g", float64(mb)/1024) },
+	"gb":      func(mb Num) string { return fmt.Sprintf("%.2f", float64(mb)/1024) },
+	"gbBytes": func(b Num) float64 { return float64(b) / 1e9 },
 	"daysLeft": func(ts int64) string {
 		if ts <= 0 {
 			return "—"
@@ -194,12 +186,7 @@ var tmplFuncs = template.FuncMap{
 		}
 		return fmt.Sprintf("%dd %dh", int(d.Hours())/24, int(d.Hours())%24)
 	},
-	"fmtUnixTime": func(ts int64) string {
-		if ts <= 0 {
-			return "—"
-		}
-		return time.Unix(ts, 0).UTC().Format("15:04 02.01.2006")
-	},
+	"fmtUnixTime": func(ts int64) string { return fmtTS(ts, "15:04 02.01.2006") },
 	// the 2FA QR code arrives as an API-supplied data URI; only allow it
 	// through as an image if it is verifiably a base64 PNG
 	"qrURL": func(s string) template.URL {
@@ -241,7 +228,7 @@ var (
 )
 
 func initTemplates() {
-	for _, p := range []string{"overview", "services", "server", "account", "support", "settings", "tickets", "ticket_new", "orders", "transactions", "donations", "affiliate", "credit", "paybyinvoice", "order", "order_config", "access", "emaillog"} {
+	for _, p := range []string{"overview", "services", "server", "account", "support", "settings", "tickets", "ticket_new", "orders", "transactions", "donations", "affiliate", "credit", "paybyinvoice", "order", "order_config", "access", "emaillog", "ticket_view"} {
 		pages[p] = template.Must(template.New("base.html").Funcs(tmplFuncs).
 			ParseFS(assets, "templates/base.html", "templates/"+p+".html"))
 	}
@@ -422,6 +409,8 @@ func newMux() http.Handler {
 	mux.HandleFunc("GET /tickets", requireAuth(ticketsPage))
 	mux.HandleFunc("GET /tickets/new", requireAuth(ticketNewPage))
 	mux.HandleFunc("POST /tickets/new", requireAuth(ticketCreate))
+	mux.HandleFunc("GET /tickets/{id}", requireAuth(ticketViewPage))
+	mux.HandleFunc("POST /tickets/{id}/answer", requireAuth(ticketAnswer))
 	mux.HandleFunc("GET /support", requireAuth(supportPage))
 	mux.HandleFunc("GET /settings", requireAuth(settingsPage))
 	mux.HandleFunc("GET /access", requireAuth(accessPage))
@@ -465,6 +454,32 @@ func newMux() http.Handler {
 	mux.HandleFunc("POST /server/{id}/iso/custom", requireAuth(serverCustomISOAdd))
 	mux.HandleFunc("POST /server/{id}/iso/custom/mount", requireAuth(serverCustomISOMount))
 	mux.HandleFunc("POST /server/{id}/iso/custom/delete", requireAuth(serverCustomISODelete))
+	mux.HandleFunc("POST /server/{id}/var", requireAuth(serverVarSet))
+	mux.HandleFunc("POST /server/{id}/bucket", requireAuth(serverBucketCreate))
+	mux.HandleFunc("POST /server/{id}/bucket/delete", requireAuth(serverBucketDelete))
+	mux.HandleFunc("POST /server/{id}/s3key", requireAuth(serverS3KeyCreate))
+	mux.HandleFunc("POST /server/{id}/s3key/delete", requireAuth(serverS3KeyDelete))
+	mux.HandleFunc("POST /server/{id}/sshkey", requireAuth(serverSSHKeyAdd))
+	mux.HandleFunc("POST /server/{id}/sshkey/delete", requireAuth(serverSSHKeyDelete))
+	mux.HandleFunc("POST /server/{id}/plesk", requireAuth(serverPlesk))
+	mux.HandleFunc("POST /server/{id}/unlockports", requireAuth(serverUnlockPorts))
+	mux.HandleFunc("POST /server/{id}/nc/update", requireAuth(serverNCUpdate))
+	mux.HandleFunc("POST /server/{id}/nc/resetdata", requireAuth(serverNCResetData))
+	mux.HandleFunc("POST /server/{id}/file/save", requireAuth(serverFileSave))
+	mux.HandleFunc("POST /server/{id}/file/delete", requireAuth(serverFileDelete))
+	mux.HandleFunc("POST /server/{id}/file/unzip", requireAuth(serverFileUnzip))
+	mux.HandleFunc("POST /server/{id}/file/download", requireAuth(serverFileDownload))
+	mux.HandleFunc("POST /server/{id}/mod/add", requireAuth(serverModAdd))
+	mux.HandleFunc("POST /server/{id}/mod/delete", requireAuth(serverModDelete))
+	mux.HandleFunc("POST /server/{id}/version", requireAuth(serverVersionChange))
+	mux.HandleFunc("POST /server/{id}/game", requireAuth(serverGameChange))
+	mux.HandleFunc("POST /server/{id}/extraport", requireAuth(serverExtraPort))
+	mux.HandleFunc("POST /server/{id}/sftp/reset", requireAuth(serverSFTPReset))
+	mux.HandleFunc("POST /server/{id}/db/reset", requireAuth(serverDBReset))
+	mux.HandleFunc("POST /server/{id}/addon/order", requireAuth(serverAddonOrder))
+	mux.HandleFunc("POST /server/{id}/addon/delete", requireAuth(serverAddonDelete))
+	mux.HandleFunc("POST /server/{id}/upgrade", requireAuth(serverUpgradeOrder))
+	mux.HandleFunc("POST /server/{id}/backup/cancel", requireAuth(serverCancelPlannedBackup))
 
 	// account / support / settings actions
 	mux.HandleFunc("POST /account/password", requireAuth(accountPassword))

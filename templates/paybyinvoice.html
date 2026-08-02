@@ -61,8 +61,8 @@
       <tr>
         <td><strong>{{.Name}}</strong></td>
         <td>{{printf "%.2f" .Total}} €</td>
-        <td style="text-align:right">
-          <div class="btn-row" style="justify-content:flex-end">
+        <td class="r">
+          <div class="btn-row end">
             {{if ne .ID "default"}}<button class="btn pbi-edit" type="button" data-id="{{.ID}}" data-name="{{.Name}}">edit</button>{{end}}
             <button class="btn btn-primary pbi-pay" type="button" data-id="{{.ID}}">pay</button>
           </div>
@@ -84,7 +84,7 @@
       <label for="pbi-create-name">Name</label>
       <input type="text" id="pbi-create-name" name="name" maxlength="64" required>
     </div>
-    <div class="btn-row" style="justify-content:flex-end">
+    <div class="btn-row end">
       <button class="btn" type="button" data-close>close</button>
       <button class="btn btn-primary" type="submit">create</button>
     </div>
@@ -102,7 +102,7 @@
       <label for="pbi-edit-name">Name</label>
       <input type="text" id="pbi-edit-name" name="name" maxlength="64" required>
     </div>
-    <div class="btn-row" style="justify-content:flex-end">
+    <div class="btn-row end">
       <button class="btn" type="button" data-close>close</button>
       <button class="btn btn-primary" type="submit">save</button>
     </div>
@@ -124,7 +124,7 @@
         {{end}}
       </select>
     </div>
-    <div class="btn-row" style="justify-content:flex-end">
+    <div class="btn-row end">
       <button class="btn" type="button" data-close>close</button>
       <button class="btn btn-primary" type="submit">save</button>
     </div>
@@ -147,7 +147,7 @@
         <option value="credit">Pay with credit</option>
       </select>
     </div>
-    <div class="btn-row" style="justify-content:flex-end">
+    <div class="btn-row end">
       <button class="btn" type="button" data-close>close</button>
       <button class="btn btn-primary" type="submit">pay</button>
     </div>

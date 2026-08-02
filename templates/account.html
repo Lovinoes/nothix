@@ -12,7 +12,7 @@
       <tr><th>Number</th><th>Date</th><th>Sum</th><th>Status</th></tr>
       {{range .Invoices}}
       <tr>
-        <td>{{if .ID}}<a href="/invoice/{{.ID}}" target="_blank" rel="noopener" style="text-decoration:underline;text-underline-offset:3px"><strong>{{.InvoiceNumber}}</strong></a>{{else}}<strong>{{.InvoiceNumber}}</strong>{{end}}</td>
+        <td>{{if .ID}}<a href="/invoice/{{.ID}}" target="_blank" rel="noopener" class="u"><strong>{{.InvoiceNumber}}</strong></a>{{else}}<strong>{{.InvoiceNumber}}</strong>{{end}}</td>
         <td>{{.Create}}</td>
         <td>{{printf "%.2f" .Sum}} €</td>
         <td>{{if eq .Status 1}}paid{{else}}<span style="color:var(--red)">open</span>{{end}}</td>
@@ -23,6 +23,6 @@
   </div>
 </section>
 
-<p class="mono-sm">Password, SSH keys, invoice data and 2FA moved to <a href="/settings" style="text-decoration:underline">Settings</a>.</p>
+<p class="mono-sm">Password, SSH keys, invoice data and 2FA moved to <a href="/settings" class="u">Settings</a>.</p>
 {{end}}
 {{end}}

@@ -29,7 +29,7 @@
   <div class="card">
     <form method="post" action="/affiliate/create">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
-      <div class="field-row" style="gap:6px;align-items:flex-end">
+      <div class="field-row bottom" style="gap:6px">
         <div class="field" style="margin:0;max-width:240px">
           <label for="af-name">Name</label>
           <input type="text" id="af-name" name="name" maxlength="64" required>
@@ -49,10 +49,10 @@
       {{range .Links}}
       <tr>
         <td><strong>{{.Name}}</strong></td>
-        <td><a href="https://datalix.de/a/{{.Name}}" target="_blank" rel="noopener" style="text-decoration:underline;text-underline-offset:3px">https://datalix.de/a/{{.Name}}</a></td>
+        <td><a href="https://datalix.de/a/{{.Name}}" target="_blank" rel="noopener" class="u">https://datalix.de/a/{{.Name}}</a></td>
         <td>{{printf "%.0f" .ServiceCount}}</td>
         <td>{{printf "%.2f" .ServiceRevenue}} €</td>
-        <td style="text-align:right">
+        <td class="r">
           <form method="post" action="/affiliate/delete" data-confirm="Delete affiliate link {{.Name}}?">
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
             <input type="hidden" name="id" value="{{.ID}}">

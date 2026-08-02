@@ -71,7 +71,7 @@
     <table class="tbl">
       <tr><th>Activity</th><th style="text-align:right">Time</th></tr>
       {{range .Dashboard.Activity}}
-      <tr><td><strong>{{.Text}}</strong></td><td style="text-align:right">{{.Time}}</td></tr>
+      <tr><td><strong>{{.Text}}</strong></td><td class="r">{{.Time}}</td></tr>
       {{end}}
     </table>
   </div>
@@ -81,34 +81,20 @@
 
 <section class="sec" id="servers">
   <h2 class="sec-label">Services</h2>
-  {{if or .Servers .Others}}
+  {{if .Servers}}
   <div class="grid">
     {{range .Servers}}
     <a class="srv-card" href="/server/{{.ID}}">
-      <div>
-        <div class="srv-name">{{if .Name}}{{.Name}}{{else}}KVM Server{{end}}</div>
-        <div class="srv-id">{{.ID}}</div>
-      </div>
-      <span class="status pending" data-status-id="{{.ID}}">…</span>
-      <div class="srv-meta">
-        <span>Price <strong>{{printf "%.2f" .Price}} €</strong></span>
-        <span>Expires <strong>{{fmtUnix .ExpireAt}}</strong></span>
-        {{if .DeleteAt}}<span style="color:var(--red)">Deletion {{fmtUnix .DeleteAt}}</span>{{end}}
-      </div>
-    </a>
-    {{end}}
-    {{range .Others}}
-    <a class="srv-card" href="https://datalix.de/cp/service/{{.ID}}" rel="noopener noreferrer">
       <div>
         <div class="srv-name">{{if .Name}}{{.Name}}{{else}}{{.ProductDisplay}}{{end}}</div>
         <div class="srv-id">{{.ID}}</div>
       </div>
       <span class="status pending" data-status-id="{{.ID}}">…</span>
       <div class="srv-meta">
+        <span>{{.ProductDisplay}}</span>
         <span>Price <strong>{{printf "%.2f" .Price}} €</strong></span>
         <span>Expires <strong>{{fmtUnix .ExpireAt}}</strong></span>
         {{if .DeleteAt}}<span style="color:var(--red)">Deletion {{fmtUnix .DeleteAt}}</span>{{end}}
-        <span>{{.ProductDisplay}} — managed in the official panel ↗</span>
       </div>
     </a>
     {{end}}
@@ -116,7 +102,7 @@
   {{else}}
   <div class="card">
     <p class="mono-sm">No services on this account. Order one on the
-    <a href="/order" style="text-decoration:underline">order page</a>.</p>
+    <a href="/order" class="u">order page</a>.</p>
   </div>
   {{end}}
 </section>

@@ -1,7 +1,7 @@
 {{define "content"}}
 {{with .Data}}
 <div class="page-head">
-  <h1 class="page-title">{{if .Info.Service.Name}}{{.Info.Service.Name}}{{else}}KVM Server{{end}}</h1>
+  <h1 class="page-title">{{if .Info.Service.Name}}{{.Info.Service.Name}}{{else}}{{.Info.Service.ProductDisplay}}{{end}}</h1>
   <span class="status pending" data-status-id="{{.ID}}">{{.Info.Product.Status}}</span>
 </div>
 <p class="srv-id" style="margin:-16px 0 22px">{{.ID}}</p>
@@ -16,7 +16,12 @@
 <div class="flash err" role="alert">The monthly traffic limit has been reached — the service is throttled to 10 MB/s (80 Mbit/s).</div>
 {{end}}
 {{if .Info.Product.PortBlock}}
+{{if .Info.Product.CanUnlockPorts}}
+<div class="flash" role="status">Mail ports are currently blocked — you can unlock them
+  <button class="chip-link" type="button" data-dlg="unlockports-modal">right here</button>.</div>
+{{else}}
 <div class="flash" role="status">Mail ports are blocked by default — contact support to have them unlocked.</div>
+{{end}}
 {{end}}
 
 <div class="srv-layout">
@@ -30,13 +35,24 @@
       {{if .Info.Product.Hostname}}<div class="mono-sm" style="margin-top:8px">{{.Info.Product.Hostname}}</div>{{end}}
 
       <div class="side-actions">
-        {{range $a := list "start" "restart" "shutdown"}}
-        <form method="post" action="/server/{{$.Data.ID}}/power">
+        {{if .Info.Display.ActionButtons}}
+        <form method="post" action="/server/{{.ID}}/power">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
-          <input type="hidden" name="action" value="{{$a}}">
-          <button class="btn" type="submit">{{$a}}</button>
+          <input type="hidden" name="action" value="start">
+          <button class="btn" type="submit">start</button>
+        </form>
+        {{if or (eq .Info.Service.ProductID 2.0) (eq .Info.Service.ProductID 4.0)}}
+        <form method="post" action="/server/{{.ID}}/power" data-confirm="Restart the server now?">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="action" value="restart">
+          <button class="btn" type="submit">restart</button>
         </form>
         {{end}}
+        <form method="post" action="/server/{{.ID}}/power" data-confirm="Shut the server down? The OS gets 60 seconds to shut down cleanly.">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="action" value="shutdown">
+          <button class="btn" type="submit">shutdown</button>
+        </form>
         <form method="post" action="/server/{{.ID}}/power" data-confirm="Stop the server? Unsaved data may be lost.">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
           <input type="hidden" name="action" value="stop">
@@ -47,31 +63,88 @@
           <input type="hidden" name="action" value="forcestop">
           <button class="btn btn-danger" type="submit">force stop</button>
         </form>
+        {{end}}
         {{if .Info.Display.NoVNC}}
         <button class="btn" type="button" data-dlg="novnc-modal">noVNC console</button>
         {{end}}
+        {{if eq .Info.Service.ProductID 4.0}}
+        <button class="btn" type="button" data-dlg="console-modal">live console</button>
+        {{end}}
+        {{if .Info.Display.LoginPlesk}}
+        <form method="post" action="/server/{{.ID}}/plesk">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <button class="btn" type="submit">log in to Plesk</button>
+        </form>
+        {{end}}
+        {{if .Info.Display.Renew}}
         <a class="btn" href="/server/{{.ID}}?tab=billing">extend / renew</a>
+        {{end}}
         {{if .Info.Display.Backup}}
         <form method="post" action="/server/{{.ID}}/backup">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
           <button class="btn" type="submit">create backup</button>
         </form>
         {{end}}
+        {{if .Info.Display.ActionButtons}}
         <a class="btn btn-danger" href="/server/{{.ID}}?tab=danger">reinstall</a>
+        {{end}}
       </div>
 
-      {{if .Info.Product.User}}
+      {{$p := .Info.Product}}
+      {{if and .Info.Display.LoginData (or $p.User $p.Login.Username $p.SFTP.User)}}
       <details class="reveal">
         <summary>Login data</summary>
+        {{if $p.User}}
         <dl class="kv">
-          <dt>User</dt><dd>{{.Info.Product.User}}</dd>
-          {{if .Info.Product.Password}}
+          <dt>User</dt><dd>{{$p.User}}</dd>
+          {{if $p.Password}}
           <dt>Password</dt>
-          <dd><span class="blur">{{.Info.Product.Password}}</span>
-              <button class="copy-btn" type="button" data-copy="{{.Info.Product.Password}}">copy</button></dd>
+          <dd><span class="blur">{{$p.Password}}</span>
+              <button class="copy-btn" type="button" data-copy="{{$p.Password}}">copy</button></dd>
           {{end}}
         </dl>
-        <p class="mono-sm" style="margin-top:8px">IP addresses are on the IP tab.</p>
+        {{end}}
+        {{if $p.Login.Username}}
+        <dl class="kv">
+          <dt>User</dt><dd>{{$p.Login.Username}}</dd>
+          {{if $p.Login.Password}}
+          <dt>Password</dt>
+          <dd><span class="blur">{{$p.Login.Password}}</span>
+              <button class="copy-btn" type="button" data-copy="{{$p.Login.Password}}">copy</button></dd>
+          {{end}}
+          {{if $p.Login.Host}}<dt>URL</dt><dd style="overflow-wrap:anywhere">{{$p.Login.Host}}</dd>{{end}}
+        </dl>
+        {{end}}
+        {{if $p.SFTP.User}}
+        <dl class="kv">
+          <dt>SFTP user</dt><dd>{{$p.SFTP.User}}</dd>
+          {{if $p.SFTP.Password}}
+          <dt>SFTP password</dt>
+          <dd><span class="blur">{{$p.SFTP.Password}}</span>
+              <button class="copy-btn" type="button" data-copy="{{$p.SFTP.Password}}">copy</button></dd>
+          {{end}}
+          <dt>SFTP host</dt><dd>{{$p.SFTP.IP}}{{if $p.SFTP.Port}}:{{printf "%.0f" $p.SFTP.Port}}{{end}}</dd>
+          {{if $p.IP}}
+          <dt>Game address</dt>
+          <dd>{{$p.IP}}{{if $p.Port}}:{{printf "%.0f" $p.Port}}{{end}}
+            {{if $p.SteamConnect}} · <a href="{{$p.SteamConnect}}" class="u">steam connect</a>{{end}}</dd>
+          {{end}}
+        </dl>
+        {{end}}
+        {{if $p.DB.User}}
+        <dl class="kv">
+          <dt>DB user</dt><dd>{{$p.DB.User}}</dd>
+          {{if $p.DB.Password}}
+          <dt>DB password</dt>
+          <dd><span class="blur">{{$p.DB.Password}}</span>
+              <button class="copy-btn" type="button" data-copy="{{$p.DB.Password}}">copy</button></dd>
+          {{end}}
+          <dt>DB host</dt><dd>{{$p.DB.Host}}{{if $p.DB.Port}}:{{printf "%.0f" $p.DB.Port}}{{end}}</dd>
+          {{if $p.DB.DB}}<dt>Database</dt><dd>{{$p.DB.DB}}</dd>{{end}}
+          {{if $p.DB.PhpMyAdminURL}}<dt>phpMyAdmin</dt><dd><a href="{{$p.DB.PhpMyAdminURL}}" target="_blank" rel="noopener noreferrer" class="u">open ↗</a></dd>{{end}}
+        </dl>
+        {{end}}
+        {{if .Info.Display.IP}}<p class="mono-sm" style="margin-top:8px">IP addresses are on the IP tab.</p>{{end}}
       </details>
       {{end}}
     </div>
@@ -86,6 +159,14 @@
       {{if .Info.Display.Backup}}<a href="/server/{{.ID}}?tab=backups" {{if eq .Tab "backups"}}class="active"{{end}}>Backups</a>{{end}}
       {{if .Info.Display.Cron}}<a href="/server/{{.ID}}?tab=tasks" {{if eq .Tab "tasks"}}class="active"{{end}}>Tasks</a>{{end}}
       {{if .Info.Display.DDoSLog}}<a href="/server/{{.ID}}?tab=ddos" {{if eq .Tab "ddos"}}class="active"{{end}}>DDoS</a>{{end}}
+      {{if .Info.Display.BucketList}}<a href="/server/{{.ID}}?tab=buckets" {{if eq .Tab "buckets"}}class="active"{{end}}>Buckets</a>{{end}}
+      {{if .Info.Display.KeyList}}<a href="/server/{{.ID}}?tab=keys" {{if eq .Tab "keys"}}class="active"{{end}}>S3 Keys</a>{{end}}
+      {{if or .Info.Display.Settings .Info.Product.Settings}}<a href="/server/{{.ID}}?tab=vars" {{if eq .Tab "vars"}}class="active"{{end}}>Variables</a>{{end}}
+      {{if and .Info.Display.SSHKeys (eq .Info.Product.OSType "linux")}}<a href="/server/{{.ID}}?tab=sshkeys" {{if eq .Tab "sshkeys"}}class="active"{{end}}>SSH Keys</a>{{end}}
+      {{if .Info.Display.Files}}<a href="/server/{{.ID}}?tab=files" {{if eq .Tab "files"}}class="active"{{end}}>Files</a>{{end}}
+      {{if .Info.Product.ModManager}}<a href="/server/{{.ID}}?tab=mods" {{if eq .Tab "mods"}}class="active"{{end}}>Mods</a>{{end}}
+      {{if eq .Info.Service.ProductID 4.0}}<a href="/server/{{.ID}}?tab=ports" {{if eq .Tab "ports"}}class="active"{{end}}>Ports</a>{{end}}
+      {{if .Info.Service.Addons}}<a href="/server/{{.ID}}?tab=addons" {{if eq .Tab "addons"}}class="active"{{end}}>Addons</a>{{end}}
       <a href="/server/{{.ID}}?tab=logs" {{if eq .Tab "logs"}}class="active"{{end}}>Log</a>
       <a href="/server/{{.ID}}?tab=settings" {{if eq .Tab "settings"}}class="active"{{end}}>Settings</a>
       <a href="/server/{{.ID}}?tab=billing" {{if eq .Tab "billing"}}class="active"{{end}}>Billing</a>
@@ -106,15 +187,16 @@
             <td>{{.GW}}</td>
             <td>{{.Netmask}}</td>
             <td>
-              <form method="post" action="/server/{{$.Data.ID}}/rdns" class="field-row" style="align-items:center;gap:6px;flex-wrap:nowrap">
+              <form method="post" action="/server/{{$.Data.ID}}/rdns" class="field-row row-inline">
                 <input type="hidden" name="csrf" value="{{$.CSRF}}">
                 <input type="hidden" name="ip" value="{{.IP}}">
                 <input type="text" name="rdns" value="{{.RDNS}}" style="min-width:150px">
                 <button class="btn" type="submit">set</button>
+                <button class="btn" type="submit" name="reset" value="1" title="restore the default rDNS entry">reset</button>
               </form>
             </td>
             <td>
-              <form method="post" action="/server/{{$.Data.ID}}/protstatus" class="field-row" style="align-items:center;gap:6px;flex-wrap:nowrap">
+              <form method="post" action="/server/{{$.Data.ID}}/protstatus" class="field-row row-inline">
                 <input type="hidden" name="csrf" value="{{$.CSRF}}">
                 <input type="hidden" name="ip" value="{{.IP}}">
                 <select name="status" style="min-width:110px">
@@ -125,7 +207,7 @@
               </form>
             </td>
             <td>
-              <form method="post" action="/server/{{$.Data.ID}}/ipnote" class="field-row" style="align-items:center;gap:6px;flex-wrap:nowrap">
+              <form method="post" action="/server/{{$.Data.ID}}/ipnote" class="field-row row-inline">
                 <input type="hidden" name="csrf" value="{{$.CSRF}}">
                 <input type="hidden" name="ip" value="{{.IP}}">
                 <input type="text" name="note" maxlength="128" value="{{.Note}}" style="min-width:110px">
@@ -159,7 +241,7 @@
     <section class="sec">
       <h2 class="sec-label">IPv6 rDNS</h2>
       <div class="card tbl-scroll">
-        <form method="post" action="/server/{{.ID}}/rdns6" class="field-row" style="align-items:flex-end;margin-bottom:12px">
+        <form method="post" action="/server/{{.ID}}/rdns6" class="field-row bottom" style="margin-bottom:12px">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
           <div class="field" style="margin:0"><label for="rdns6-ip">IPv6 address</label>
             <input type="text" id="rdns6-ip" name="ip" required></div>
@@ -174,7 +256,7 @@
           <tr>
             <td><strong>{{.IP}}</strong></td>
             <td>
-              <form method="post" action="/server/{{$.Data.ID}}/rdns6" class="field-row" style="align-items:center;gap:6px;flex-wrap:nowrap">
+              <form method="post" action="/server/{{$.Data.ID}}/rdns6" class="field-row row-inline">
                 <input type="hidden" name="csrf" value="{{$.CSRF}}">
                 <input type="hidden" name="ip" value="{{.IP}}">
                 <input type="text" name="rdns" value="{{.RDNS}}" style="min-width:150px">
@@ -182,7 +264,7 @@
               </form>
             </td>
             <td>
-              <form method="post" action="/server/{{$.Data.ID}}/ipnote" class="field-row" style="align-items:center;gap:6px;flex-wrap:nowrap">
+              <form method="post" action="/server/{{$.Data.ID}}/ipnote" class="field-row row-inline">
                 <input type="hidden" name="csrf" value="{{$.CSRF}}">
                 <input type="hidden" name="ip" value="{{.IP}}">
                 <input type="hidden" name="v6" value="1">
@@ -190,7 +272,7 @@
                 <button class="btn" type="submit">save</button>
               </form>
             </td>
-            <td style="text-align:right">
+            <td class="r">
               <form method="post" action="/server/{{$.Data.ID}}/rdns6/delete" data-confirm="Delete the rDNS entry for {{.IP}}?">
                 <input type="hidden" name="csrf" value="{{$.CSRF}}">
                 <input type="hidden" name="ip" value="{{.IP}}">
@@ -207,7 +289,16 @@
     {{end}}
 
     {{if eq .Tab "hardware"}}
-    {{if .Hardware}}
+    {{if .HWKV}}
+    <section class="sec">
+      <h2 class="sec-label">Hardware</h2>
+      <div class="card">
+        <dl class="kv">
+          {{range .HWKV}}<dt>{{.K}}</dt><dd>{{.V}}</dd>{{end}}
+        </dl>
+      </div>
+    </section>
+    {{else if .Hardware}}
     <section class="sec">
       <h2 class="sec-label">Hardware</h2>
       <div class="stats">
@@ -249,7 +340,7 @@
           </dd>
         </dl>
         <hr class="divider">
-        <form method="post" action="/server/{{.ID}}/uplink" class="field-row" style="align-items:flex-end">
+        <form method="post" action="/server/{{.ID}}/uplink" class="field-row bottom">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
           <div class="field" style="margin:0;max-width:160px">
             <label for="uplink">Uplink (MB/s)</label>
@@ -343,6 +434,13 @@
     <section class="sec">
       <h2 class="sec-label">Backups</h2>
       <div class="card">
+        {{if eq .Info.Product.Status "backupplanned"}}
+        <form method="post" action="/server/{{.ID}}/backup/cancel" style="margin-bottom:12px"
+              data-confirm="Cancel the planned backup?">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <button class="btn btn-danger" type="submit">cancel planned backup</button>
+        </form>
+        {{end}}
         {{if .Backups}}
         <div class="tbl-scroll">
         <table class="tbl">
@@ -350,7 +448,7 @@
           {{range .Backups}}
           <tr>
             <td>
-              <form method="post" action="/server/{{$.Data.ID}}/backup/rename" class="field-row" style="align-items:center;gap:6px;flex-wrap:nowrap">
+              <form method="post" action="/server/{{$.Data.ID}}/backup/rename" class="field-row row-inline">
                 <input type="hidden" name="csrf" value="{{$.CSRF}}">
                 <input type="hidden" name="backup" value="{{.ID}}">
                 <input type="text" name="name" maxlength="64" value="{{if .DisplayName}}{{.DisplayName}}{{else}}{{.BackupName}}{{end}}" style="min-width:160px">
@@ -360,7 +458,7 @@
             <td>{{if .Locked}}<span class="chip ok">locked</span>{{else}}<span class="chip">not locked</span>{{end}}</td>
             <td>{{.CreatedOn}}</td>
             <td>
-              <div class="btn-row" style="justify-content:flex-end">
+              <div class="btn-row end">
                 <form method="post" action="/server/{{$.Data.ID}}/backup/lock" data-confirm="{{if .Locked}}Unlock this backup? Cron jobs may delete it again.{{else}}Lock this backup? Cron jobs will no longer delete it.{{end}}">
                   <input type="hidden" name="csrf" value="{{$.CSRF}}">
                   <input type="hidden" name="backup" value="{{.ID}}">
@@ -398,7 +496,7 @@
       <div class="card">
         <form method="post" action="/server/{{.ID}}/cron">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
-          <div class="field-row" style="align-items:flex-end">
+          <div class="field-row bottom">
             <div class="field" style="margin:0"><label for="cron-name">Name</label>
               <input type="text" id="cron-name" name="name" maxlength="64" required></div>
             <div class="field" style="margin:0;max-width:170px"><label for="cron-expr">Cron expression</label>
@@ -413,6 +511,16 @@
               </select></div>
             <button class="btn" type="submit">create task</button>
           </div>
+          <div class="field-row" style="margin-top:8px;gap:18px">
+            <div class="check">
+              <input type="checkbox" id="cron-nf" name="notifyfinish" value="1">
+              <label for="cron-nf">email on finish</label>
+            </div>
+            <div class="check">
+              <input type="checkbox" id="cron-nx" name="notifyfailure" value="1">
+              <label for="cron-nx">email on failure</label>
+            </div>
+          </div>
           <p class="mono-sm" style="margin-top:8px">Format: minute hour day-of-month month day-of-week. Backups above the limit of 4 delete the oldest automatically.</p>
         </form>
       </div>
@@ -426,7 +534,7 @@
           {{range .Cron}}
           <tr>
             <td colspan="3">
-              <form method="post" action="/server/{{$.Data.ID}}/cron/edit" class="field-row" style="align-items:center;gap:6px;flex-wrap:nowrap">
+              <form method="post" action="/server/{{$.Data.ID}}/cron/edit" class="field-row row-inline">
                 <input type="hidden" name="csrf" value="{{$.CSRF}}">
                 <input type="hidden" name="cron" value="{{.ID}}">
                 <input type="text" name="name" maxlength="64" value="{{.DisplayName}}" style="min-width:130px">
@@ -437,11 +545,15 @@
                   <option value="{{$a}}" {{if eq $a $cur}}selected{{end}}>{{$a}}</option>
                   {{end}}
                 </select>
+                <label class="mono-sm" style="white-space:nowrap" title="email on finish">
+                  <input type="checkbox" name="notifyfinish" value="1" {{if .NotifyDone}}checked{{end}}> ✓✉</label>
+                <label class="mono-sm" style="white-space:nowrap" title="email on failure">
+                  <input type="checkbox" name="notifyfailure" value="1" {{if .NotifyFail}}checked{{end}}> ✗✉</label>
                 <button class="btn" type="submit">save</button>
               </form>
             </td>
             <td>{{.NextExecute}}</td>
-            <td style="text-align:right">
+            <td class="r">
               <form method="post" action="/server/{{$.Data.ID}}/cron/delete" data-confirm="Delete the scheduled task {{.DisplayName}}?">
                 <input type="hidden" name="csrf" value="{{$.CSRF}}">
                 <input type="hidden" name="cron" value="{{.ID}}">
@@ -491,6 +603,411 @@
         </div>
         {{else}}<p class="mono-sm">No incidents recorded.</p>{{end}}
       </div>
+    </section>
+    {{end}}
+
+    {{if eq .Tab "buckets"}}
+    <section class="sec">
+      <h2 class="sec-label">Buckets</h2>
+      <div class="card">
+        <form method="post" action="/server/{{.ID}}/bucket" class="field-row bottom">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <div class="field" style="margin:0">
+            <label for="bucket-name">New bucket (a-z, 0-9, . and -, unique, 3–63 chars)</label>
+            <input type="text" id="bucket-name" name="name" minlength="3" maxlength="63" pattern="[a-z0-9.-]+" required>
+          </div>
+          <button class="btn btn-primary" type="submit">create bucket</button>
+        </form>
+        {{if .Buckets}}
+        <div class="tbl-scroll" style="margin-top:14px">
+        <table class="tbl">
+          <tr><th>Name</th><th>Endpoint</th><th>Usage</th><th>Objects</th><th></th></tr>
+          {{range .Buckets}}
+          <tr>
+            <td><strong>{{.Name}}</strong></td>
+            <td class="mono-sm">{{.Endpoint}}</td>
+            <td>{{printf "%.2f" (gbBytes .Size)}} GB</td>
+            <td>{{printf "%.0f" .Objects}}</td>
+            <td class="r">
+              <form method="post" action="/server/{{$.Data.ID}}/bucket/delete" data-confirm="Delete this bucket? Only empty buckets can be deleted.">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="name" value="{{.Name}}">
+                <button class="btn btn-danger" type="submit">delete</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </table>
+        </div>
+        {{else}}<p class="mono-sm" style="margin-top:12px">No buckets yet.</p>{{end}}
+      </div>
+    </section>
+    {{end}}
+
+    {{if eq .Tab "keys"}}
+    <section class="sec">
+      <h2 class="sec-label">S3 Keys</h2>
+      <div class="card">
+        <form method="post" action="/server/{{.ID}}/s3key">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <button class="btn btn-primary" type="submit">create S3 key</button>
+        </form>
+        {{if .S3Keys}}
+        <div class="tbl-scroll" style="margin-top:14px">
+        <table class="tbl">
+          <tr><th>Access key</th><th>Secret key</th><th></th></tr>
+          {{range .S3Keys}}
+          <tr>
+            <td class="mono-sm">{{.AccessKey}}
+              <button class="copy-btn" type="button" data-copy="{{.AccessKey}}">copy</button></td>
+            <td class="mono-sm"><span class="blur">{{.SecretKey}}</span>
+              <button class="copy-btn" type="button" data-copy="{{.SecretKey}}">copy</button></td>
+            <td class="r">
+              <form method="post" action="/server/{{$.Data.ID}}/s3key/delete" data-confirm="Delete this S3 key? This cannot be undone.">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="key" value="{{.AccessKey}}">
+                <button class="btn btn-danger" type="submit">delete</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </table>
+        </div>
+        {{else}}<p class="mono-sm" style="margin-top:12px">No S3 keys yet.</p>{{end}}
+      </div>
+    </section>
+    {{end}}
+
+    {{if eq .Tab "vars"}}
+    <section class="sec">
+      {{if or .GameVersions .Games}}
+      <h2 class="sec-label">Game</h2>
+      <div class="card" style="margin-bottom:14px">
+        {{if .GameVersions}}
+        <form method="post" action="/server/{{.ID}}/version" class="field-row bottom"
+              data-confirm="{{if eq .Info.Product.VersionChange 2.0}}Change version? The jar file is replaced — data is retained.{{else}}Change version? ALL data on the server is deleted and the new version is installed.{{end}}">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="confirm" value="yes">
+          <div class="field" style="margin:0;max-width:260px">
+            <label for="gs-version">Version</label>
+            <select id="gs-version" name="version">
+              {{range .GameVersions}}<option value="{{.ID}}" {{if eq .ID $.Data.Info.Product.Version}}selected{{end}}>{{.Version}}</option>{{end}}
+            </select>
+          </div>
+          <button class="btn btn-danger" type="submit">change version</button>
+        </form>
+        <p class="mono-sm" style="margin-top:8px">{{if eq .Info.Product.VersionChange 2.0}}Changing the version swaps the jar file; your data is retained.{{else}}Changing the version deletes all data on the server.{{end}}</p>
+        {{end}}
+        {{if .Games}}
+        <hr class="divider">
+        <h3 class="sec-label" style="margin-bottom:10px">Change game</h3>
+        <form method="post" action="/server/{{.ID}}/game"
+              data-confirm="Change the game? ALL data on the server is deleted and the selected game is installed.">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="confirm" value="yes">
+          <div class="field-row bottom">
+            <div class="field" style="margin:0;max-width:260px">
+              <label for="game-select">Game</label>
+              <select id="game-select" name="game">
+                {{range .Games}}<option value="{{.ID}}" {{if eq .ID $.Data.Info.Product.GameID}}selected{{end}}>{{.DisplayName}}{{if eq .ID $.Data.Info.Product.GameID}} (current){{end}}</option>{{end}}
+              </select>
+            </div>
+            {{range .Games}}
+            <fieldset class="game-set" data-game="{{.ID}}" hidden disabled style="border:0;padding:0;margin:0">
+              <div class="field" style="margin:0;max-width:200px">
+                <label>Version</label>
+                <select name="version">
+                  {{range .Versions}}<option value="{{.ID}}">{{.Version}}</option>{{end}}
+                </select>
+              </div>
+            </fieldset>
+            {{end}}
+            <button class="btn btn-danger" type="submit">change game</button>
+          </div>
+        </form>
+        {{end}}
+      </div>
+      {{end}}
+      <h2 class="sec-label">Variables</h2>
+      <div class="card tbl-scroll">
+        {{if .Vars}}
+        <table class="tbl">
+          <tr><th>Name</th><th>Value</th><th></th></tr>
+          {{range .Vars}}
+          <tr>
+            <td><strong>{{.Name}}</strong>{{if .Description}}<div class="mono-sm">{{.Description}}</div>{{end}}</td>
+            <td>
+              {{if .CanEdit}}
+              <form method="post" action="/server/{{$.Data.ID}}/var" class="field-row" style="gap:6px;margin:0">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="variable" value="{{.EnvVariable}}">
+                <input type="text" name="value" value="{{.ServerValue}}" maxlength="1024" aria-label="Value for {{.Name}}">
+                <button class="btn" type="submit">save</button>
+              </form>
+              {{else}}{{.ServerValue}}{{end}}
+              {{if .DefaultValue}}<div class="mono-sm">default: {{.DefaultValue}}</div>{{end}}
+            </td>
+            <td class="r">
+              {{if and .CanEdit .DefaultValue}}
+              <form method="post" action="/server/{{$.Data.ID}}/var" data-confirm="Reset this variable to its default value?">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="variable" value="{{.EnvVariable}}">
+                <input type="hidden" name="value" value="{{.DefaultValue}}">
+                <button class="btn" type="submit">reset</button>
+              </form>
+              {{end}}
+            </td>
+          </tr>
+          {{end}}
+        </table>
+        {{else}}<p class="mono-sm">No variables available.</p>{{end}}
+      </div>
+    </section>
+    {{end}}
+
+    {{if eq .Tab "sshkeys"}}
+    <section class="sec">
+      <h2 class="sec-label">SSH Keys</h2>
+      <div class="card">
+        <p class="mono-sm" style="margin-bottom:12px">Added keys become active after a service restart.</p>
+        {{if .SSHKeys}}
+        <div class="tbl-scroll">
+        <table class="tbl">
+          <tr><th>Name</th><th>Key</th><th></th></tr>
+          {{range .SSHKeys}}
+          <tr>
+            <td><strong>{{.DisplayName}}</strong></td>
+            <td class="mono-sm" style="max-width:320px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">{{.Key}}</td>
+            <td class="r">
+              <form method="post" action="/server/{{$.Data.ID}}/sshkey/delete" data-confirm="Remove this SSH key from the service?">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="id" value="{{.ID}}">
+                <button class="btn btn-danger" type="submit">remove</button>
+              </form>
+            </td>
+          </tr>
+          {{end}}
+        </table>
+        </div>
+        <hr class="divider">
+        {{end}}
+        <form method="post" action="/server/{{.ID}}/sshkey">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <div class="field-row">
+            <div class="field" style="max-width:200px">
+              <label for="srv-key-name">Name</label>
+              <input type="text" id="srv-key-name" name="displayname" maxlength="64" required>
+            </div>
+            <div class="field">
+              <label for="srv-key">Public key</label>
+              <input type="text" id="srv-key" name="key" placeholder="ssh-ed25519 AAAA… user@host" required>
+            </div>
+          </div>
+          <button class="btn" type="submit">add key</button>
+        </form>
+      </div>
+    </section>
+    {{end}}
+
+    {{if eq .Tab "files"}}
+    <section class="sec">
+      <h2 class="sec-label">Files</h2>
+      <div class="card">
+        <p class="mono-sm" style="margin-bottom:10px">
+          / <a href="/server/{{.ID}}?tab=files">home</a>{{range .Crumbs}} / <a href="/server/{{$.Data.ID}}?tab=files&dir={{.Path}}">{{.Name}}</a>{{end}}
+        </p>
+        {{if .Files}}
+        <div class="tbl-scroll">
+        <table class="tbl">
+          <tr><th>Name</th><th>Size</th><th></th></tr>
+          {{range .Files}}
+          <tr>
+            <td>
+              {{if .IsFile}}
+                {{if or (eq .MimeType "text/plain") (eq .MimeType "text/plain; charset=utf-8") (eq .MimeType "application/json")}}
+                <a href="/server/{{$.Data.ID}}?tab=files&dir={{$.Data.Dir}}&file={{$.Data.Dir}}{{.Name}}">{{.Name}}</a>
+                {{else}}{{.Name}}{{end}}
+              {{else}}
+                <a href="/server/{{$.Data.ID}}?tab=files&dir={{$.Data.Dir}}{{.Name}}/"><strong>{{.Name}}/</strong></a>
+              {{end}}
+            </td>
+            <td class="mono-sm">{{.SizeDisplay}}</td>
+            <td class="r">
+              <div class="btn-row end">
+                {{if .IsFile}}
+                <form method="post" action="/server/{{$.Data.ID}}/file/download">
+                  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                  <input type="hidden" name="path" value="{{$.Data.Dir}}{{.Name}}">
+                  <button class="btn" type="submit">download</button>
+                </form>
+                {{if eq .MimeType "application/zip"}}
+                <form method="post" action="/server/{{$.Data.ID}}/file/unzip" data-confirm="Unzip {{.Name}} into this directory?">
+                  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                  <input type="hidden" name="name" value="{{.Name}}">
+                  <input type="hidden" name="dir" value="{{$.Data.Dir}}">
+                  <button class="btn" type="submit">unzip</button>
+                </form>
+                {{end}}
+                {{end}}
+                <form method="post" action="/server/{{$.Data.ID}}/file/delete" data-confirm="Delete {{.Name}} irrevocably?">
+                  <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                  <input type="hidden" name="path" value="{{$.Data.Dir}}{{.Name}}">
+                  <button class="btn btn-danger" type="submit">delete</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {{end}}
+        </table>
+        </div>
+        {{else}}<p class="mono-sm">Empty directory.</p>{{end}}
+        <p class="mono-sm" style="margin-top:10px">Uploads go through the official panel's upload gateway —
+          <a href="https://datalix.de/cp/service/{{.ID}}" target="_blank" rel="noopener noreferrer" class="u">upload via the official panel</a>.</p>
+      </div>
+      {{if .FileName}}
+      <div class="card" style="margin-top:14px">
+        <h3 class="sec-label" style="margin-bottom:10px">{{.FileName}}</h3>
+        <form method="post" action="/server/{{.ID}}/file/save">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <input type="hidden" name="path" value="{{.FileName}}">
+          <textarea name="data" rows="18" style="width:100%;font-family:inherit" aria-label="File content">{{.FileData}}</textarea>
+          <div class="btn-row end" style="margin-top:10px">
+            <span class="mono-sm" style="flex:1">files up to ~60 KB can be edited here; use SFTP for bigger ones</span>
+            <button class="btn btn-primary" type="submit">save</button>
+          </div>
+        </form>
+      </div>
+      {{end}}
+    </section>
+    {{end}}
+
+    {{if eq .Tab "mods"}}
+    <section class="sec">
+      <h2 class="sec-label">Mod manager</h2>
+      <div class="card">
+        <form method="get" action="/server/{{.ID}}" class="field-row bottom">
+          <input type="hidden" name="tab" value="mods">
+          <div class="field" style="margin:0">
+            <label for="modq">Search installable mods</label>
+            <input type="text" id="modq" name="q" value="{{.ModQuery}}" maxlength="64">
+          </div>
+          <button class="btn" type="submit">search</button>
+          {{if .ModQuery}}<a class="btn" href="/server/{{.ID}}?tab=mods">installed mods</a>{{end}}
+        </form>
+        {{if .Mods}}
+        <div class="tbl-scroll" style="margin-top:14px">
+        <table class="tbl">
+          <tr><th>{{if .ModQuery}}Search results{{else}}Installed mods{{end}}</th><th></th></tr>
+          {{range .Mods}}
+          <tr>
+            <td><strong>{{.Title}}</strong>{{if .Summary}}<div class="mono-sm">{{.Summary}}</div>{{end}}</td>
+            <td class="r">
+              {{if $.Data.ModQuery}}
+              <form method="post" action="/server/{{$.Data.ID}}/mod/add" data-confirm="Add the mod {{.Title}}?">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="mod" value="{{.Name}}">
+                <button class="btn" type="submit">add</button>
+              </form>
+              {{else}}
+              <form method="post" action="/server/{{$.Data.ID}}/mod/delete" data-confirm="Delete the mod {{.Title}}?">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="mod" value="{{.Name}}">
+                <button class="btn btn-danger" type="submit">delete</button>
+              </form>
+              {{end}}
+            </td>
+          </tr>
+          {{end}}
+        </table>
+        </div>
+        {{else}}<p class="mono-sm" style="margin-top:12px">{{if .ModQuery}}No mods found.{{else}}No mods installed.{{end}}</p>{{end}}
+      </div>
+    </section>
+    {{end}}
+
+    {{if eq .Tab "ports"}}
+    <section class="sec">
+      <h2 class="sec-label">Network ports</h2>
+      <div class="card">
+        <form method="post" action="/server/{{.ID}}/extraport" data-confirm="Assign an extra port to this server? Up to 5 extra ports are possible.">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <button class="btn btn-primary" type="submit">add extra port</button>
+        </form>
+        {{if .NetPorts}}
+        <div class="tbl-scroll" style="margin-top:14px">
+        <table class="tbl">
+          <tr><th>IP</th><th>Port</th><th>Type</th></tr>
+          {{range .NetPorts}}
+          <tr>
+            <td class="mono-sm">{{.IP}}</td>
+            <td class="mono-sm">{{printf "%.0f" .Port}}</td>
+            <td>{{if .Default}}<span class="chip ok">default</span>{{else}}<span class="chip">custom</span>{{end}}</td>
+          </tr>
+          {{end}}
+        </table>
+        </div>
+        {{else}}<p class="mono-sm" style="margin-top:12px">No port data available.</p>{{end}}
+      </div>
+    </section>
+    {{end}}
+
+    {{if eq .Tab "addons"}}
+    <section class="sec">
+      <h2 class="sec-label">Addons</h2>
+      <div class="card">
+        {{if .Addons}}
+        <table class="tbl">
+          <tr><th>Name</th><th>Price</th><th></th></tr>
+          {{range .Addons}}
+          <tr>
+            <td><strong>{{.Name}}</strong></td>
+            <td>{{printf "%.2f" .Price}} €</td>
+            <td class="r">
+              {{if .Deletable}}
+              <form method="post" action="/server/{{$.Data.ID}}/addon/delete" data-confirm="Delete this addon? No refund is issued and the addon stops working.">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <input type="hidden" name="addon" value="{{.ID}}">
+                <button class="btn btn-danger" type="submit">delete</button>
+              </form>
+              {{end}}
+            </td>
+          </tr>
+          {{end}}
+        </table>
+        {{else}}<p class="mono-sm">No addons on this service.</p>{{end}}
+      </div>
+      {{if .AddonOffers}}
+      <div class="card" style="margin-top:14px">
+        <h3 class="sec-label" style="margin-bottom:10px">Order addon</h3>
+        <form method="post" action="/server/{{.ID}}/addon/order" data-confirm="Order this addon now? You will be forwarded to the payment provider.">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <div class="field-row">
+            <div class="field">
+              <label for="addon-sel">Addon</label>
+              <select id="addon-sel" name="addon">
+                {{range .AddonOffers}}<option value="{{.Type}}">{{.Name}} — {{printf "%.2f" .Price}} €{{if .Once}} one-time{{else}}/mo{{end}}</option>{{end}}
+              </select>
+            </div>
+            <div class="field" style="max-width:110px">
+              <label for="addon-amount">Amount</label>
+              <input type="number" id="addon-amount" name="amount" value="1" min="1" max="100">
+            </div>
+            <div class="field" style="max-width:200px">
+              <label for="addon-method">Payment method</label>
+              <select id="addon-method" name="method">
+                {{range .PayMethods}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+              </select>
+            </div>
+          </div>
+          <div class="check" style="margin-bottom:10px">
+            <input type="checkbox" id="addon-credit" name="credit" value="1" checked>
+            <label for="addon-credit">use credit balance</label>
+          </div>
+          <p class="mono-sm" style="margin-bottom:10px">Recurring addons are billed pro-rata for the remaining runtime and raise the monthly price; one-time addons are charged in full once.</p>
+          <button class="btn btn-primary" type="submit">order addon</button>
+        </form>
+      </div>
+      {{end}}
     </section>
     {{end}}
 
@@ -549,7 +1066,7 @@
           <button class="btn btn-danger" type="submit">remove ISO</button>
         </form>
         {{else if .ISOList}}
-        <form method="post" action="/server/{{.ID}}/iso/mount" class="field-row" style="align-items:flex-end"
+        <form method="post" action="/server/{{.ID}}/iso/mount" class="field-row bottom"
               data-confirm="Insert the ISO? This stops your server; start it manually afterwards.">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
           <div class="field" style="margin:0;max-width:300px">
@@ -568,7 +1085,7 @@
     <section class="sec">
       <h2 class="sec-label">Custom ISO</h2>
       <div class="card tbl-scroll">
-        <form method="post" action="/server/{{.ID}}/iso/custom" class="field-row" style="align-items:flex-end;margin-bottom:12px">
+        <form method="post" action="/server/{{.ID}}/iso/custom" class="field-row bottom" style="margin-bottom:12px">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
           <div class="field" style="margin:0;min-width:280px"><label for="isourl">Direct download link (.iso)</label>
             <input type="text" id="isourl" name="url" maxlength="512" placeholder="https://example.com/image.iso" required></div>
@@ -587,8 +1104,8 @@
               {{else if eq .Status 3.0}}<span class="chip ok">mounted</span>
               {{else}}<span class="chip err">download failed</span>{{end}}
             </td>
-            <td style="text-align:right">
-              <div class="btn-row" style="justify-content:flex-end">
+            <td class="r">
+              <div class="btn-row end">
                 {{if or (eq .Status 1.0) (eq .Status 3.0)}}
                 <form method="post" action="/server/{{$.Data.ID}}/iso/custom/mount" data-confirm="{{if eq .Status 3.0}}Unmount this ISO?{{else}}Mount this ISO? The server has to be started manually afterwards.{{end}}">
                   <input type="hidden" name="csrf" value="{{$.CSRF}}">
@@ -621,7 +1138,10 @@
           <dt>Expires</dt><dd><strong>{{fmtUnix .Info.Service.ExpireAt}}</strong> ({{daysLeft .Info.Service.ExpireAt}})</dd>
           {{if .Info.Service.DeleteAt}}<dt>Deletion</dt><dd style="color:var(--red)">{{fmtUnix .Info.Service.DeleteAt}}</dd>{{end}}
         </dl>
-        <div class="btn-row" style="align-items:flex-end">
+        {{if not .Info.Display.Renew}}
+        <p class="mono-sm">Renewal is not available for this service.</p>
+        {{else}}
+        <div class="btn-row bottom">
           <form method="post" action="/server/{{.ID}}/extend" data-confirm="Extend the server runtime now?">
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
             <label for="days">Extend runtime (days)</label>
@@ -646,19 +1166,11 @@
           {{if .Info.Service.AutoRenew}}<span class="chip ok">active</span>{{else}}<span class="chip">inactive</span>{{end}}
           — renews 7 days before expiry when your credit is sufficient.</p>
         <div class="btn-row">
-          {{if .Info.Service.AutoRenew}}
           <form method="post" action="/server/{{.ID}}/autorenew">
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
-            <input type="hidden" name="enable" value="0">
-            <button class="btn btn-danger" type="submit">disable</button>
+            <input type="hidden" name="enable" value="{{if .Info.Service.AutoRenew}}0{{else}}1{{end}}">
+            <button class="btn{{if .Info.Service.AutoRenew}} btn-danger{{end}}" type="submit">{{if .Info.Service.AutoRenew}}disable{{else}}enable{{end}}</button>
           </form>
-          {{else}}
-          <form method="post" action="/server/{{.ID}}/autorenew">
-            <input type="hidden" name="csrf" value="{{$.CSRF}}">
-            <input type="hidden" name="enable" value="1">
-            <button class="btn" type="submit">enable</button>
-          </form>
-          {{end}}
         </div>
         <hr class="divider">
         <h3 class="sec-label" style="margin-bottom:10px">Auto-renew via PayPal / credit card</h3>
@@ -672,7 +1184,7 @@
           <button class="btn btn-danger" type="submit">disable</button>
         </form>
         {{else}}
-        <form method="post" action="/server/{{.ID}}/autorenew/payment" class="field-row" style="align-items:flex-end">
+        <form method="post" action="/server/{{.ID}}/autorenew/payment" class="field-row bottom">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
           <input type="hidden" name="enable" value="1">
           <div class="field" style="margin:0;max-width:180px">
@@ -685,6 +1197,34 @@
           <button class="btn" type="submit">activate</button>
         </form>
         {{end}}
+        {{end}}
+        {{if .Upgrades}}
+        <hr class="divider">
+        <h3 class="sec-label" style="margin-bottom:10px">Upgrade package</h3>
+        <form method="post" action="/server/{{.ID}}/upgrade"
+              data-confirm="Order this upgrade? You will be forwarded to the payment provider. Stop and start the server afterwards to apply it.">
+          <input type="hidden" name="csrf" value="{{$.CSRF}}">
+          <div class="field-row bottom">
+            <div class="field" style="margin:0;min-width:280px">
+              <label for="upgrade-sel">Package</label>
+              <select id="upgrade-sel" name="package">
+                {{range .Upgrades}}<option value="{{.ID}}" {{if .Details}}title="{{.Details}}"{{end}}>{{.Label}}</option>{{end}}
+              </select>
+            </div>
+            <div class="field" style="margin:0;max-width:200px">
+              <label for="upgrade-method">Payment method</label>
+              <select id="upgrade-method" name="method">
+                {{range .PayMethods}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+              </select>
+            </div>
+            <button class="btn" type="submit">order upgrade</button>
+          </div>
+          <div class="check" style="margin-top:10px">
+            <input type="checkbox" id="upgrade-credit" name="credit" value="1" checked>
+            <label for="upgrade-credit">use credit balance</label>
+          </div>
+        </form>
+        {{end}}
       </div>
     </section>
     {{end}}
@@ -693,6 +1233,7 @@
     <section class="sec">
       <h2 class="sec-label">Danger zone</h2>
       <div class="card danger-zone">
+        {{if .Info.Display.ActionButtons}}
         <form method="post" action="/server/{{.ID}}/reinstall" data-confirm="REINSTALL will wipe all data on the server. This cannot be undone. Continue?">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
           <label for="os">Reinstall operating system</label>
@@ -708,19 +1249,47 @@
           </div>
         </form>
         <hr class="divider">
+        {{end}}
         <div class="btn-row">
+          {{if .Info.Display.PasswordReset}}
           <form method="post" action="/server/{{.ID}}/resetpassword" data-confirm="Reset the root/admin password?">
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
             <button class="btn btn-danger" type="submit">reset password</button>
           </form>
+          {{end}}
+          {{if .Info.Display.Rescue}}
           <form method="post" action="/server/{{.ID}}/rescue" data-confirm="Boot into rescue mode?">
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
             <button class="btn btn-danger" type="submit">rescue mode</button>
           </form>
+          {{end}}
+          {{if or .Info.Display.ISOMount .Info.Product.Rescue}}
           <form method="post" action="/server/{{.ID}}/iso/remove" data-confirm="Eject the ISO / disable rescue? This stops the server.">
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
             <button class="btn btn-danger" type="submit">eject ISO / disable rescue</button>
           </form>
+          {{end}}
+          {{if eq .Info.Service.ProductID 4.0}}
+          <form method="post" action="/server/{{.ID}}/sftp/reset" data-confirm="Reset the SFTP login data? A new password is generated.">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <button class="btn btn-danger" type="submit">reset SFTP data</button>
+          </form>
+          <form method="post" action="/server/{{.ID}}/db/reset" data-confirm="Reset the database login data? A new password is generated.">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <button class="btn btn-danger" type="submit">reset DB data</button>
+          </form>
+          {{end}}
+          {{if eq .Info.Service.ProductID 5.0}}
+          <form method="post" action="/server/{{.ID}}/nc/update" data-confirm="Update Nextcloud? This may take a few minutes.">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <button class="btn" type="submit">update Nextcloud</button>
+          </form>
+          <form method="post" action="/server/{{.ID}}/nc/resetdata" data-confirm="Reset ALL Nextcloud data and reinstall? The data cannot be restored.">
+            <input type="hidden" name="csrf" value="{{$.CSRF}}">
+            <input type="hidden" name="confirm" value="1">
+            <button class="btn btn-danger" type="submit">reset all data</button>
+          </form>
+          {{end}}
         </div>
       </div>
     </section>
@@ -729,13 +1298,46 @@
   </div>
 </div>
 
+{{if and .Info.Product.PortBlock .Info.Product.CanUnlockPorts}}
+<dialog id="unlockports-modal" class="modal modal-sm">
+  <div class="modal-head">
+    <h2 class="modal-title">Unlock email ports</h2>
+  </div>
+  <form method="post" action="/server/{{.ID}}/unlockports">
+    <input type="hidden" name="csrf" value="{{$.CSRF}}">
+    <div class="field">
+      <label for="unlock-reason">Reason</label>
+      <input type="text" id="unlock-reason" name="reason" maxlength="512" required>
+    </div>
+    <div class="btn-row end">
+      <button class="btn" type="button" data-close>close</button>
+      <button class="btn btn-primary" type="submit">unlock</button>
+    </div>
+  </form>
+</dialog>
+{{end}}
+
+{{if eq .Info.Service.ProductID 4.0}}
+<dialog id="console-modal" class="modal modal-sm">
+  <div class="modal-head">
+    <h2 class="modal-title">Live console</h2>
+  </div>
+  <p class="notice-warn">The live console streams over the official panel's session websocket, which an API-key login can't attach to. It opens in the official Datalix panel — you need to be logged in at datalix.de.</p>
+  <div class="btn-row end">
+    <button class="btn" type="button" data-close>close</button>
+    <a class="btn btn-primary" data-close target="_blank" rel="noopener noreferrer"
+       href="https://datalix.de/cp/service/{{.ID}}">ok — open console</a>
+  </div>
+</dialog>
+{{end}}
+
 {{if .Info.Display.NoVNC}}
 <dialog id="novnc-modal" class="modal modal-sm">
   <div class="modal-head">
     <h2 class="modal-title">noVNC console</h2>
   </div>
   <p class="notice-warn">This redirects to the official Datalix panel — you need to be logged in at datalix.de, then it connects straight to the noVNC console of this server.</p>
-  <div class="btn-row" style="justify-content:flex-end">
+  <div class="btn-row end">
     <button class="btn" type="button" data-close>close</button>
     <a class="btn btn-primary" data-close target="_blank" rel="noopener noreferrer"
        href="https://datalix.de/cp/service/{{.ID}}?noVNC=1&autoconnect=1&host=novnc.datalix.de&port=443&encrypt=1">ok — open console</a>

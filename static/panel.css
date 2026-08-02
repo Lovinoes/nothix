@@ -209,10 +209,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   color: var(--fg-2); white-space: nowrap;
 }
 .chip::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; }
-.chip.ok   { color: var(--green); border-color: rgba(61,220,132,0.35); }
-.chip.ok::before { animation: livepulse 1.8s infinite; }
-.chip.warn { color: var(--amber); border-color: rgba(255,176,32,0.35); }
-.chip.err  { color: var(--red); border-color: rgba(215,25,33,0.45); }
+.chip.ok, .status.running   { color: var(--green); border-color: rgba(61,220,132,0.35); }
+.chip.ok::before, .status.running::before { animation: livepulse 1.8s infinite; }
+.chip.warn, .status.pending { color: var(--amber); border-color: rgba(255,176,32,0.35); }
+.chip.err, .status.stopped  { color: var(--red); border-color: rgba(215,25,33,0.45); }
 .chip-form { display: inline-flex; align-items: center; gap: 8px; }
 .chip-link {
   background: none; border: none; cursor: pointer;
@@ -314,10 +314,6 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   width: fit-content;
 }
 .status::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
-.status.running { color: var(--green); border-color: rgba(61,220,132,0.35); }
-.status.running::before { animation: livepulse 1.8s infinite; }
-.status.stopped { color: var(--red); border-color: rgba(215,25,33,0.45); }
-.status.pending { color: var(--amber); border-color: rgba(255,176,32,0.35); }
 .status.pending::before { animation: blink 1s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0.2; } }
 
@@ -422,11 +418,10 @@ input[type=text], input[type=password], input[type=url], input[type=number], sel
   padding: 8px 10px;
   transition: border-color 0.12s, background 0.12s;
 }
-input::placeholder { color: var(--fg-4); }
+input::placeholder, textarea::placeholder { color: var(--fg-4); }
 input:hover, select:hover, textarea:hover { border-color: var(--line-2); }
 input:focus, select:focus, textarea:focus { border-color: var(--fg-4); background: var(--bg-3); outline: none; }
 textarea { min-height: 140px; resize: vertical; line-height: 1.5; }
-textarea::placeholder { color: var(--fg-4); }
 select {
   appearance: none;
   background-image: linear-gradient(45deg, transparent 50%, var(--fg-3) 50%), linear-gradient(135deg, var(--fg-3) 50%, transparent 50%);
@@ -533,6 +528,11 @@ select option { background: var(--bg-2); color: var(--fg); }
 
 /* ── MISC ── */
 .mono-sm { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+.r { text-align: right; }
+.end { justify-content: flex-end; }
+.bottom { align-items: flex-end; }
+.u { text-decoration: underline; text-underline-offset: 3px; }
+.field-row.row-inline { align-items: center; gap: 6px; flex-wrap: nowrap; }
 .copy-btn {
   background: none; border: 0; color: var(--fg-4); cursor: pointer;
   font-family: var(--font-ui);
@@ -724,3 +724,9 @@ form.censor input[type="url"]:hover, form.censor input[type="url"]:focus { filte
 button.btn[data-close]:hover, button.btn[data-close]:focus-visible {
   border-color: var(--red); color: var(--red); background: rgba(215, 25, 33, 0.12);
 }
+
+/* ticket message thread */
+.ticket-msg { margin-bottom: 10px; }
+.ticket-msg-admin { border-left: 3px solid var(--green); }
+.ticket-msg-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.ticket-msg-body { white-space: pre-wrap; overflow-wrap: anywhere; }

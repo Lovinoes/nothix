@@ -30,8 +30,8 @@
         <td>{{if eq .Status 2.0}}<span class="chip ok">Active</span>{{else if eq .Status 3.0}}<span class="chip err">Denied</span>{{else}}<span class="chip warn">Pending</span>{{end}}</td>
         <td class="mono-sm">{{.ServiceID}}</td>
         <td>{{.Date}}</td>
-        <td style="text-align:right">
-          <div class="btn-row" style="justify-content:flex-end">
+        <td class="r">
+          <div class="btn-row end">
             {{if .Perms}}<button class="btn" type="button" data-dlg="access-edit-{{.ID}}">edit</button>{{end}}
             <form method="post" action="/access/delete" data-confirm="Delete this access? The invited user loses access to the service.">
               <input type="hidden" name="csrf" value="{{$.CSRF}}">
@@ -61,8 +61,8 @@
         <td><strong>{{if .Name}}{{.Name}}{{else}}—{{end}}</strong></td>
         <td class="mono-sm">{{.ServiceID}}</td>
         <td>{{.Date}}</td>
-        <td style="text-align:right">
-          <div class="btn-row" style="justify-content:flex-end">
+        <td class="r">
+          <div class="btn-row end">
             <form method="post" action="/access/accept">
               <input type="hidden" name="csrf" value="{{$.CSRF}}">
               <input type="hidden" name="id" value="{{.ID}}">
@@ -124,7 +124,7 @@
       </div>
     </fieldset>
     {{end}}
-    <div class="btn-row" style="justify-content:flex-end;margin-top:12px">
+    <div class="btn-row end" style="margin-top:12px">
       <button class="btn" type="button" data-close>close</button>
       <button class="btn btn-primary" type="submit">create</button>
     </div>
@@ -160,7 +160,7 @@
         {{end}}
       </div>
     </fieldset>
-    <div class="btn-row" style="justify-content:flex-end;margin-top:12px">
+    <div class="btn-row end" style="margin-top:12px">
       <button class="btn" type="button" data-close>close</button>
       <button class="btn btn-primary" type="submit">save</button>
     </div>

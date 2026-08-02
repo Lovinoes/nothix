@@ -34,7 +34,7 @@
         <p class="mono-sm" style="margin:10px 0">Save the backup codes now — they are shown only once.</p>
         <form method="post" action="/settings/twofa/finish">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
-          <div class="field-row" style="gap:6px;align-items:flex-end">
+          <div class="field-row bottom" style="gap:6px">
             <div class="field" style="margin:0">
               <label for="code">2FA code</label>
               <input type="text" id="code" name="code" maxlength="16" autocomplete="one-time-code" required style="width:140px">
@@ -197,7 +197,7 @@
 <section class="sec">
   <h2 class="sec-label">Notifications</h2>
   <p class="mono-sm" style="margin-bottom:14px">More about POST webhooks in the
-    <a href="https://datalix.eu/wiki/general/postwebhook/" rel="noopener noreferrer" style="text-decoration:underline">wiki</a>.
+    <a href="https://datalix.eu/wiki/general/postwebhook/" rel="noopener noreferrer" class="u">wiki</a>.
     Webhook URLs are blurred — hover or focus a field to reveal it.</p>
   {{if .Notifications}}
   {{range .Notifications}}

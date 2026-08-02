@@ -2,16 +2,20 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,6 +24,11 @@ import (
 )
 
 /* ── input validation (trust boundary: everything from the browser) ── */
+
+// badInput reports an over-long or control-character-carrying form value.
+func badInput(s string, max int) bool {
+	return len(s) > max || strings.ContainsFunc(s, unicode.IsControl)
+}
 
 var (
 	reAPIKey   = regexp.MustCompile(`^[A-Za-z0-9_-]{8,128}$`)
@@ -36,10 +45,6 @@ func stripTags(s string) string {
 	return html.UnescapeString(reTag.ReplaceAllString(s, ""))
 }
 
-func isKVM(productDisplay string) bool {
-	return strings.Contains(strings.ToUpper(productDisplay), "KVM")
-}
-
 // The API returns the literal string "null" for unnamed services.
 func cleanName(s string) string {
 	if s == "null" {
@@ -50,15 +55,10 @@ func cleanName(s string) string {
 
 /* ── login ── */
 
-func setLoginCSRF(w http.ResponseWriter, r *http.Request) string {
-	v := randHex()
-	http.SetCookie(w, &http.Cookie{Name: "dplogin", Value: v, Path: "/login",
-		MaxAge: 900, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: isHTTPS(r)})
-	return v
-}
-
 func renderLogin(w http.ResponseWriter, r *http.Request, errMsg string, code int) {
-	csrf := setLoginCSRF(w, r)
+	csrf := randHex()
+	http.SetCookie(w, &http.Cookie{Name: "dplogin", Value: csrf, Path: "/login",
+		MaxAge: 900, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: isHTTPS(r)})
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(code)
 	if err := loginTmpl.Execute(w, viewData{CSRF: csrf, Err: errMsg}); err != nil {
@@ -170,7 +170,6 @@ type overviewView struct {
 	Username   string
 	EmailState int // 0=unverified, 1=verified, 2=throwaway
 	Servers    []Service
-	Others     []Service
 }
 
 func overviewPage(w http.ResponseWriter, r *http.Request, s *session) {
@@ -190,12 +189,8 @@ func overviewPage(w http.ResponseWriter, r *http.Request, s *session) {
 	ov := overviewView{Greeting: greeting(), Username: s.username}
 	for i := range all {
 		all[i].Name = cleanName(all[i].Name)
-		if isKVM(all[i].ProductDisplay) {
-			ov.Servers = append(ov.Servers, all[i])
-		} else {
-			ov.Others = append(ov.Others, all[i])
-		}
 	}
+	ov.Servers = all
 	var dash Dashboard
 	if err := api.get("/user/"+url.PathEscape(s.userID)+"/dashboard", &dash); err == nil {
 		for i := range dash.Activity {
@@ -217,7 +212,7 @@ type servicesView struct {
 func servicesPage(w http.ResponseWriter, r *http.Request, s *session) {
 	deleted := r.URL.Query().Get("tab") == "deleted"
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	if len(q) > 64 || strings.ContainsFunc(q, unicode.IsControl) {
+	if badInput(q, 64) {
 		q = ""
 	}
 	typ := "active"
@@ -282,30 +277,150 @@ func servicesHide(w http.ResponseWriter, r *http.Request, s *session) {
 }
 
 type serverView struct {
-	ID         string
-	Tab        string
-	Info       ServiceInfo
-	Hardware   *Hardware
-	IPs        *ServiceIPs
-	Traffic    *TrafficHistory
-	Backups    []Backup
-	OSList     []OSEntry
-	Logs       []ActionLog
-	Cron       []CronJob
-	Incidents  *IncidentsPage
-	Search     string
-	CustomISOs []CustomISO
-	ISOList    []OSEntry
-	UplinkMB   int // product uplink converted to MB/s for the edit form
+	ID          string
+	Tab         string
+	Info        ServiceInfo
+	Hardware    *Hardware
+	IPs         *ServiceIPs
+	Traffic     *TrafficHistory
+	Backups     []Backup
+	OSList      []OSEntry
+	Logs        []ActionLog
+	Cron        []CronJob
+	Incidents   *IncidentsPage
+	Search      string
+	CustomISOs  []CustomISO
+	ISOList     []OSEntry
+	UplinkMB    int // product uplink converted to MB/s for the edit form
 	MaxUplinkMB int
+	HWKV        []kvRow // generic hardware view for non-KVM products
+	Buckets     []bucketRow
+	S3Keys      []S3Key
+	Vars        []GameVariable
+	SSHKeys     []SSHKey
+	// files tab
+	Files    []FileEntry
+	Dir      string
+	Crumbs   []crumb
+	FileName string
+	FileData string
+	// gameserver extras
+	Mods         []Mod
+	ModQuery     string
+	GameVersions []GameVersion
+	Games        []Game
+	NetPorts     []NetPort
+	// addons + upgrade
+	Addons      []ServiceAddon
+	AddonOffers []AddonOffer
+	PayMethods  []payMethod
+	Upgrades    []upgradeRow
 	// ddos log pagination
 	IncFrom, IncTo, IncPrev, IncNext int
 	IncHasPrev, IncHasNext           bool
 }
 
+type bucketRow struct {
+	Bucket
+	Endpoint string
+}
+
+type crumb struct{ Name, Path string }
+
+type upgradeRow struct{ ID, Label, Details string }
+
+// upgradeRowOf renders one GET /upgrade entry; field sets differ per product,
+// so everything beyond the common fields is flattened generically.
+func upgradeRowOf(m map[string]any) upgradeRow {
+	str := func(k string) string {
+		switch v := m[k].(type) {
+		case string:
+			return v
+		case float64:
+			return strconv.FormatFloat(v, 'f', -1, 64)
+		}
+		return ""
+	}
+	num := func(k string) float64 { v, _ := m[k].(float64); return v }
+	row := upgradeRow{ID: str("id")}
+	row.Label = fmt.Sprintf("%s — %.2f €/mo (pay now %.2f €)",
+		strings.TrimSpace(str("displayname")), num("monthlyprice"), num("onetimepayment"))
+	for _, k := range []string{"id", "displayname", "monthlyprice", "onetimepayment", "active", "line"} {
+		delete(m, k)
+	}
+	var parts []string
+	for _, kv := range kvRows(m) {
+		parts = append(parts, kv.K+" "+kv.V)
+	}
+	row.Details = strings.Join(parts, " · ")
+	return row
+}
+
+// remoteDir/remoteFile sanitize user-supplied paths on the remote gameserver.
+func remoteDir(p string) string {
+	p = path.Clean("/" + p)
+	if p != "/" {
+		p += "/"
+	}
+	return p
+}
+
+func remoteFile(p string) string {
+	if p == "" || !strings.HasPrefix(p, "/") || badInput(p, 1024) {
+		return ""
+	}
+	// reject traversal segments only — "my..cfg" is a legal filename
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return ""
+		}
+	}
+	return p
+}
+
+type kvRow struct{ K, V string }
+
+// kvRows flattens an unknown-shape API object (scalars plus one level of
+// object arrays, like the dedicated-server hardware response) for display.
+func kvRows(raw map[string]any) []kvRow {
+	flat := func(m map[string]any) string {
+		var parts []string
+		for _, k := range slices.Sorted(maps.Keys(m)) {
+			switch m[k].(type) {
+			case string, float64, bool:
+				parts = append(parts, fmt.Sprintf("%s %v", k, m[k]))
+			}
+		}
+		return strings.Join(parts, ", ")
+	}
+	var rows []kvRow
+	for k, v := range raw {
+		switch vv := v.(type) {
+		case string, float64, bool:
+			rows = append(rows, kvRow{k, fmt.Sprint(vv)})
+		case []any:
+			var lines []string
+			for _, it := range vv {
+				if m, ok := it.(map[string]any); ok {
+					lines = append(lines, flat(m))
+				} else {
+					lines = append(lines, fmt.Sprint(it))
+				}
+			}
+			if len(lines) > 0 {
+				rows = append(rows, kvRow{k, strings.Join(lines, " · ")})
+			}
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].K < rows[j].K })
+	return rows
+}
+
 var serverTabs = map[string]bool{"network": true, "hardware": true, "live": true,
 	"traffic": true, "backups": true, "tasks": true, "ddos": true,
-	"logs": true, "settings": true, "billing": true, "danger": true}
+	"logs": true, "settings": true, "billing": true, "danger": true,
+	"buckets": true, "keys": true, "vars": true, "sshkeys": true,
+	"files": true, "mods": true, "ports": true, "addons": true}
 
 func serverPage(w http.ResponseWriter, r *http.Request, s *session) {
 	id := r.PathValue("id")
@@ -324,11 +439,20 @@ func serverPage(w http.ResponseWriter, r *http.Request, s *session) {
 		apiFail(w, r, "/services", err)
 		return
 	}
-	if !isKVM(info.Service.ProductDisplay) {
-		http.NotFound(w, r) // this panel manages KVM servers only
-		return
-	}
 	info.Service.Name = cleanName(info.Service.Name)
+	// products without an IP tab land on their first available tab instead
+	if tab == "network" && !bool(info.Display.IP) {
+		switch {
+		case bool(info.Display.Hardware):
+			tab = "hardware"
+		case bool(info.Display.LiveData):
+			tab = "live"
+		case bool(info.Display.Backup):
+			tab = "backups"
+		default:
+			tab = "settings"
+		}
+	}
 
 	// tabs fetch only what they show — keeps us far away from the API rate limits
 	sv := serverView{ID: id, Tab: tab, Info: info}
@@ -342,9 +466,17 @@ func serverPage(w http.ResponseWriter, r *http.Request, s *session) {
 		}
 	case "hardware":
 		if info.Display.Hardware {
-			var hw Hardware
-			if api.get("/service/"+pid+"/hardware", &hw) == nil {
-				sv.Hardware = &hw
+			// shape differs per product — decode the KVM struct from the raw
+			// map and fall back to a generic key/value view for everything else
+			var raw map[string]any
+			if api.get("/service/"+pid+"/hardware", &raw) == nil {
+				b, _ := json.Marshal(raw)
+				hw := &Hardware{}
+				json.Unmarshal(b, hw)
+				sv.Hardware = hw
+				if hw.Cores == 0 {
+					sv.HWKV = kvRows(raw)
+				}
 			}
 		}
 	case "traffic":
@@ -363,6 +495,89 @@ func serverPage(w http.ResponseWriter, r *http.Request, s *session) {
 		if info.Display.Backup {
 			api.get("/service/"+pid+"/backup", &sv.Backups)
 		}
+	case "buckets":
+		if info.Display.BucketList {
+			var bs []Bucket
+			if api.get("/service/"+pid+"/buckets", &bs) == nil {
+				for _, b := range bs {
+					ep := b.Name + ".s3.fra.databucket.eu"
+					if strings.Contains(b.Name, ".") { // dotted names break TLS on the subdomain form
+						ep = "s3.fra.databucket.eu/" + b.Name
+					}
+					sv.Buckets = append(sv.Buckets, bucketRow{b, ep})
+				}
+			}
+		}
+	case "keys":
+		if info.Display.KeyList {
+			api.get("/service/"+pid+"/keys", &sv.S3Keys)
+		}
+	case "vars":
+		if len(info.Product.Settings) > 0 { // nextcloud sends its settings inline
+			for _, k := range slices.Sorted(maps.Keys(info.Product.Settings)) {
+				sv.Vars = append(sv.Vars, GameVariable{Name: k, EnvVariable: k,
+					ServerValue: info.Product.Settings[k], CanEdit: true})
+			}
+		} else if info.Display.Settings {
+			api.get("/service/"+pid+"/settings", &sv.Vars)
+		}
+		if info.Service.ProductID == 4 {
+			api.get("/service/"+pid+"/version", &sv.GameVersions)
+			api.get("/service/"+pid+"/gamechanger", &sv.Games)
+		}
+	case "sshkeys":
+		if info.Display.SSHKeys {
+			api.get("/service/"+pid+"/sshkeys", &sv.SSHKeys)
+		}
+	case "files":
+		if info.Display.Files {
+			sv.Dir = remoteDir(r.URL.Query().Get("dir"))
+			api.postOut("/service/"+pid+"/files", map[string]string{"directory": sv.Dir}, &sv.Files)
+			p := "/"
+			for _, part := range strings.Split(strings.Trim(sv.Dir, "/"), "/") {
+				if part == "" {
+					continue
+				}
+				p += part + "/"
+				sv.Crumbs = append(sv.Crumbs, crumb{part, p})
+			}
+			if f := remoteFile(r.URL.Query().Get("file")); f != "" {
+				var out struct {
+					Data string `json:"data"`
+				}
+				if api.get("/service/"+pid+"/file?filepath="+url.QueryEscape(f), &out) == nil {
+					sv.FileName = f
+					sv.FileData = out.Data
+				}
+			}
+		}
+	case "mods":
+		if info.Product.ModManager {
+			sv.ModQuery = strings.TrimSpace(r.URL.Query().Get("q"))
+			if sv.ModQuery != "" {
+				api.postOut("/service/"+pid+"/mod/list", map[string]string{"query": sv.ModQuery}, &sv.Mods)
+			} else {
+				api.get("/service/"+pid+"/mods", &sv.Mods)
+			}
+		}
+	case "ports":
+		if info.Service.ProductID == 4 {
+			api.get("/service/"+pid+"/networkdata", &sv.NetPorts)
+		}
+	case "addons":
+		if info.Service.Addons {
+			api.get("/service/"+pid+"/addons", &sv.Addons)
+			api.get("/service/"+pid+"/addons/list", &sv.AddonOffers)
+			sv.PayMethods = payMethods
+		}
+	case "billing":
+		var raws []map[string]any
+		if api.get("/service/"+pid+"/upgrade", &raws) == nil {
+			for _, m := range raws {
+				sv.Upgrades = append(sv.Upgrades, upgradeRowOf(m))
+			}
+		}
+		sv.PayMethods = payMethods
 	case "tasks":
 		api.get("/service/"+pid+"/cron", &sv.Cron)
 	case "ddos":
@@ -468,10 +683,7 @@ func ordersPage(w http.ResponseWriter, r *http.Request, s *session) {
 		}
 		ov.Rows = append(ov.Rows, orderRow{Order: o, StatusText: st, StatusClass: cls, TypeText: tt})
 	}
-	step := op.PageInfo.StepSize
-	if step <= 0 {
-		step = 10
-	}
+	step := cmp.Or(op.PageInfo.StepSize, 10)
 	ov.From = op.PageInfo.Last
 	ov.To = min(ov.From+step, ov.Total)
 	ov.HasPrev = start > 0
@@ -507,7 +719,8 @@ func accountPage(w http.ResponseWriter, r *http.Request, s *session) {
 // both a raw PDF body and a JSON envelope carrying it as base64.
 func invoiceView(w http.ResponseWriter, r *http.Request, s *session) {
 	id := r.PathValue("id")
-	data, err := (API{token: s.token}).getRaw("/user/" + url.PathEscape(s.userID) + "/invoice/" + url.PathEscape(id))
+	data, err := (API{token: s.token}).raw(http.MethodGet,
+		"/user/"+url.PathEscape(s.userID)+"/invoice/"+url.PathEscape(id), nil)
 	if err != nil {
 		apiFail(w, r, "/account", err)
 		return
@@ -660,43 +873,36 @@ func affiliateLinkDelete(w http.ResponseWriter, r *http.Request, s *session) {
 
 type payMethod struct {
 	ID, Name, Logo string
-	Crypto         bool
 }
+
+// Crypto is read from templates ({{if .Crypto}}); methods render like fields.
+func (p payMethod) Crypto() bool { return strings.HasPrefix(p.ID, "cryptocurrency") }
 
 // payMethods mirrors the official panel's hardcoded payment method list;
 // logos are vendored copies of cdn.datalix.de/images/payment/* (CSP: img-src 'self').
-var payMethods = func() []payMethod {
-	ids := [][3]string{
-		{"paypal", "PayPal", "paypal.png"}, {"creditcard", "CreditCard", "cc.png"},
-		{"psc", "PaySafeCard", "paysafecard.svg"}, {"eps", "EPS", "eps.png"},
-		{"przelewy24", "Przelewy24", "przelewy24.svg"}, {"cryptocurrency-btc", "BTC", "bitcoin.webp"},
-		{"cryptocurrency-ltc", "Litecoin", "ltc.png"}, {"alipay", "Alipay", "alipay.png"},
-		{"cryptocurrency-xmr", "Monero", "monero.png"}, {"banktransfer", "Bank transfer", "sepa.png"},
-		{"ideal", "iDEAL", "ideal.svg"}, {"cryptocurrency-eth", "ETH", "ethereum.svg"},
-		{"cryptocurrency-bch", "BCH", "bitcoin-cash-bch-logo.svg"},
-		{"cryptocurrency-usdt.trc20", "USDT.TRC20", "tether-usdt-logo.png"},
-		{"cryptocurrency-usdt.prc20", "USDT.PRC20", "tether-usdt-logo.png"},
-		{"cryptocurrency-usdt.bep20", "USDT.BEP20", "tether-usdt-logo.png"},
-		{"cryptocurrency-btc.ln", "BTC.LN", "btc-ln-logo.png"},
-		{"cryptocurrency-USDC", "USDC", "usdc.webp"},
-		{"cryptocurrency-USDC.BEP20", "USDC.BEP20", "usdc.webp"},
-		{"cryptocurrency-USDC.PRC20", "USDC.PRC20", "usdc.webp"},
-		{"cryptocurrency-USDC.SOL", "USDC.SOL", "usdc.webp"},
-		{"cryptocurrency-SOL", "SOL", "solana-sol-logo.png"},
-		{"cryptocurrency-TRX", "TRX", "TRX.png"},
-	}
-	ms := make([]payMethod, len(ids))
-	for i, p := range ids {
-		ms[i] = payMethod{ID: p[0], Name: p[1], Logo: p[2], Crypto: strings.HasPrefix(p[0], "cryptocurrency")}
-	}
-	return ms
-}()
+var payMethods = []payMethod{
+	{"paypal", "PayPal", "paypal.png"}, {"creditcard", "CreditCard", "cc.png"},
+	{"psc", "PaySafeCard", "paysafecard.svg"}, {"eps", "EPS", "eps.png"},
+	{"przelewy24", "Przelewy24", "przelewy24.svg"}, {"cryptocurrency-btc", "BTC", "bitcoin.webp"},
+	{"cryptocurrency-ltc", "Litecoin", "ltc.png"}, {"alipay", "Alipay", "alipay.png"},
+	{"cryptocurrency-xmr", "Monero", "monero.png"}, {"banktransfer", "Bank transfer", "sepa.png"},
+	{"ideal", "iDEAL", "ideal.svg"}, {"cryptocurrency-eth", "ETH", "ethereum.svg"},
+	{"cryptocurrency-bch", "BCH", "bitcoin-cash-bch-logo.svg"},
+	{"cryptocurrency-usdt.trc20", "USDT.TRC20", "tether-usdt-logo.png"},
+	{"cryptocurrency-usdt.prc20", "USDT.PRC20", "tether-usdt-logo.png"},
+	{"cryptocurrency-usdt.bep20", "USDT.BEP20", "tether-usdt-logo.png"},
+	{"cryptocurrency-btc.ln", "BTC.LN", "btc-ln-logo.png"},
+	{"cryptocurrency-USDC", "USDC", "usdc.webp"},
+	{"cryptocurrency-USDC.BEP20", "USDC.BEP20", "usdc.webp"},
+	{"cryptocurrency-USDC.PRC20", "USDC.PRC20", "usdc.webp"},
+	{"cryptocurrency-USDC.SOL", "USDC.SOL", "usdc.webp"},
+	{"cryptocurrency-SOL", "SOL", "solana-sol-logo.png"},
+	{"cryptocurrency-TRX", "TRX", "TRX.png"},
+}
 
 func payMethodByID(id string) *payMethod {
-	for i := range payMethods {
-		if payMethods[i].ID == id {
-			return &payMethods[i]
-		}
+	if i := slices.IndexFunc(payMethods, func(p payMethod) bool { return p.ID == id }); i >= 0 {
+		return &payMethods[i]
 	}
 	return nil
 }
@@ -758,19 +964,25 @@ func creditTopup(w http.ResponseWriter, r *http.Request, s *session) {
 		return
 	}
 
+	createAndPay(w, r, api, u+"/credit/add",
+		map[string]string{"amount": amount, "tax": string(inv.Country)}, method.ID, "/credit")
+}
+
+// createAndPay creates an order at path and forwards to the payment provider.
+func createAndPay(w http.ResponseWriter, r *http.Request, api API, path string,
+	form map[string]string, method, target string) {
 	var created struct {
 		ID Str `json:"id"`
 	}
-	if err := api.postOut(u+"/credit/add",
-		map[string]string{"amount": amount, "tax": string(inv.Country)}, &created); err != nil {
-		apiFail(w, r, "/credit", err)
+	if err := api.postOut(path, form, &created); err != nil {
+		apiFail(w, r, target, err)
 		return
 	}
 	if created.ID == "" {
-		apiFail(w, r, "/credit", errors.New("payment could not be created"))
+		apiFail(w, r, target, errors.New("order could not be created"))
 		return
 	}
-	payOrderRedirect(w, r, api, string(created.ID), method.ID, "/credit")
+	payOrderRedirect(w, r, api, string(created.ID), method, target)
 }
 
 // payOrderRedirect finishes a payment: POST order/{id}/pay, then forward the
@@ -901,18 +1113,7 @@ func pbiPay(w http.ResponseWriter, r *http.Request, s *session) {
 		flashOK(w, r, "/paybyinvoice", "Invoice paid with credit.")
 		return
 	}
-	var created struct {
-		ID Str `json:"id"`
-	}
-	if err := api.postOut(payPath, form, &created); err != nil {
-		apiFail(w, r, "/paybyinvoice", err)
-		return
-	}
-	if created.ID == "" {
-		apiFail(w, r, "/paybyinvoice", errors.New("payment could not be created"))
-		return
-	}
-	payOrderRedirect(w, r, api, string(created.ID), method, "/paybyinvoice")
+	createAndPay(w, r, api, payPath, form, method, "/paybyinvoice")
 }
 
 /* ── order ── */
@@ -1032,6 +1233,63 @@ func ticketsPage(w http.ResponseWriter, r *http.Request, s *session) {
 	render(w, "tickets", v)
 }
 
+var reTicketID = regexp.MustCompile(`^[0-9]{1,20}$`)
+
+type ticketMsg struct {
+	Author string
+	Time   int64
+	Admin  bool
+	Text   string
+}
+
+func ticketViewPage(w http.ResponseWriter, r *http.Request, s *session) {
+	id := r.PathValue("id")
+	if !reTicketID.MatchString(id) {
+		http.NotFound(w, r)
+		return
+	}
+	var td TicketDetail
+	// undocumented endpoint mirroring the reseller ticket details
+	if err := (API{token: s.token}).get("/support/ticket/"+url.PathEscape(id), &td); err != nil {
+		apiFail(w, r, "/tickets", err)
+		return
+	}
+	msgs := make([]ticketMsg, 0, len(td.Answers))
+	for _, a := range td.Answers {
+		if a.Internal {
+			continue
+		}
+		msgs = append(msgs, ticketMsg{
+			Author: a.Author.Username,
+			Time:   a.CreatedOn,
+			Admin:  bool(a.Admin),
+			Text:   stripTags(strings.ReplaceAll(a.Content, "<br>", "\n")),
+		})
+	}
+	v := vd(fmt.Sprintf("Ticket #%s", id), "tickets", s, r)
+	v.Data = struct {
+		ID     string
+		Ticket TicketDetail
+		Msgs   []ticketMsg
+	}{id, td, msgs}
+	render(w, "ticket_view", v)
+}
+
+func ticketAnswer(w http.ResponseWriter, r *http.Request, s *session) {
+	id := r.PathValue("id")
+	text := strings.TrimSpace(r.PostFormValue("text"))
+	if !reTicketID.MatchString(id) || text == "" || len(text) > 10000 {
+		http.Error(w, "invalid answer", http.StatusBadRequest)
+		return
+	}
+	if err := (API{token: s.token}).post("/support/ticket/"+url.PathEscape(id)+"/answer",
+		map[string]string{"text": text}); err != nil {
+		apiFail(w, r, "/tickets/"+id, err)
+		return
+	}
+	flashOK(w, r, "/tickets/"+id, "Answer sent.")
+}
+
 func ticketNewPage(w http.ResponseWriter, r *http.Request, s *session) {
 	v := vd("Create Ticket", "createticket", s, r)
 	var services []Service
@@ -1047,7 +1305,7 @@ func ticketCreate(w http.ResponseWriter, r *http.Request, s *session) {
 	title := strings.TrimSpace(r.PostFormValue("title"))
 	text := strings.TrimSpace(r.PostFormValue("text"))
 	service := r.PostFormValue("service")
-	if title == "" || len(title) > 128 || strings.ContainsFunc(title, unicode.IsControl) ||
+	if title == "" || badInput(title, 128) ||
 		text == "" || len(text) > 10000 {
 		http.Error(w, "invalid ticket data", http.StatusBadRequest)
 		return
@@ -1191,7 +1449,7 @@ func validInvoiceField(v string, required bool) bool {
 	if v == "" {
 		return !required
 	}
-	return len(v) <= 128 && !strings.ContainsFunc(v, unicode.IsControl)
+	return !badInput(v, 128)
 }
 
 var reCountryID = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
@@ -1306,7 +1564,7 @@ func serverPower(w http.ResponseWriter, r *http.Request, s *session) {
 
 func serverRename(w http.ResponseWriter, r *http.Request, s *session) {
 	name := strings.TrimSpace(r.PostFormValue("name"))
-	if len(name) > 64 || strings.ContainsFunc(name, unicode.IsControl) {
+	if badInput(name, 64) {
 		http.Error(w, "invalid name", http.StatusBadRequest)
 		return
 	}
@@ -1332,6 +1590,12 @@ func serverHostname(w http.ResponseWriter, r *http.Request, s *session) {
 func serverRDNS(w http.ResponseWriter, r *http.Request, s *session) {
 	ip := net.ParseIP(strings.TrimSpace(r.PostFormValue("ip")))
 	rdns := strings.TrimSuffix(strings.TrimSpace(r.PostFormValue("rdns")), ".")
+	if ip != nil && r.PostFormValue("reset") == "1" {
+		// default rDNS like the official panel: reversed octets + .in-addr.arpa
+		o := strings.Split(ip.String(), ".")
+		slices.Reverse(o)
+		rdns = strings.Join(o, ".") + ".in-addr.arpa"
+	}
 	if ip == nil || !reHostname.MatchString(rdns) {
 		http.Error(w, "invalid ip or rdns", http.StatusBadRequest)
 		return
@@ -1501,7 +1765,7 @@ func serverIPNote(w http.ResponseWriter, r *http.Request, s *session) {
 	if r.PostFormValue("v6") == "1" {
 		kind = "ipv6"
 	}
-	if len(note) > 128 || strings.ContainsFunc(note, unicode.IsControl) {
+	if badInput(note, 128) {
 		http.Error(w, "invalid note", http.StatusBadRequest)
 		return
 	}
@@ -1579,7 +1843,7 @@ func serverBackupRename(w http.ResponseWriter, r *http.Request, s *session) {
 		return
 	}
 	name := strings.TrimSpace(r.PostFormValue("name"))
-	if name == "" || len(name) > 64 || strings.ContainsFunc(name, unicode.IsControl) {
+	if name == "" || badInput(name, 64) {
 		http.Error(w, "invalid backup name", http.StatusBadRequest)
 		return
 	}
@@ -1610,12 +1874,13 @@ func cronFields(w http.ResponseWriter, r *http.Request) (map[string]string, bool
 	name := strings.TrimSpace(r.PostFormValue("name"))
 	expr := strings.TrimSpace(r.PostFormValue("expression"))
 	action := r.PostFormValue("action")
-	if name == "" || len(name) > 64 || strings.ContainsFunc(name, unicode.IsControl) ||
+	if name == "" || badInput(name, 64) ||
 		!reCronExpr.MatchString(expr) || !cronActions[action] {
 		http.Error(w, "invalid scheduled task", http.StatusBadRequest)
 		return nil, false
 	}
-	return map[string]string{"name": name, "expression": expr, "action": action}, true
+	return map[string]string{"name": name, "expression": expr, "action": action,
+		"emailnotifyonfinish": chk(r, "notifyfinish"), "emailnotifyonfailure": chk(r, "notifyfailure")}, true
 }
 
 func serverCronCreate(w http.ResponseWriter, r *http.Request, s *session) {
@@ -1740,7 +2005,7 @@ func accountSSHKeyAdd(w http.ResponseWriter, r *http.Request, s *session) {
 	name := strings.TrimSpace(r.PostFormValue("displayname"))
 	key := strings.TrimSpace(r.PostFormValue("key"))
 	okPrefix := strings.HasPrefix(key, "ssh-") || strings.HasPrefix(key, "ecdsa-")
-	if name == "" || len(name) > 64 || strings.ContainsFunc(name, unicode.IsControl) ||
+	if name == "" || badInput(name, 64) ||
 		!okPrefix || len(key) > 4096 || strings.ContainsAny(key, "\r\n") {
 		http.Error(w, "invalid SSH key", http.StatusBadRequest)
 		return
@@ -1763,7 +2028,7 @@ func accountSSHKeyDelete(w http.ResponseWriter, r *http.Request, s *session) {
 
 func accountRedeem(w http.ResponseWriter, r *http.Request, s *session) {
 	code := strings.TrimSpace(r.PostFormValue("code"))
-	if code == "" || len(code) > 64 || strings.ContainsFunc(code, unicode.IsControl) {
+	if code == "" || badInput(code, 64) {
 		http.Error(w, "invalid code", http.StatusBadRequest)
 		return
 	}
@@ -1938,7 +2203,7 @@ func accessPage(w http.ResponseWriter, r *http.Request, s *session) {
 func permsForm(r *http.Request, name string) url.Values {
 	form := url.Values{"name": {name}}
 	for _, p := range r.PostForm["perm"] {
-		if p != "" && len(p) <= 64 && !strings.ContainsFunc(p, unicode.IsControl) {
+		if p != "" && !badInput(p, 64) {
 			form.Add("permissions[]", p)
 		}
 	}
@@ -2008,4 +2273,339 @@ func emaillogPage(w http.ResponseWriter, r *http.Request, s *session) {
 	v := vd("Emaillog", "emaillog", s, r)
 	v.Data = struct{ Logs []EmailLogEntry }{logs}
 	render(w, "emaillog", v)
+}
+
+/* ── per-product management: variables, buckets, S3 keys, SSH keys, plesk ── */
+
+var reBucketName = regexp.MustCompile(`^[a-z0-9.-]{3,63}$`)
+
+func serverVarSet(w http.ResponseWriter, r *http.Request, s *session) {
+	variable := strings.TrimSpace(r.PostFormValue("variable"))
+	value := r.PostFormValue("value")
+	if variable == "" || badInput(variable, 128) || badInput(value, 1024) {
+		http.Error(w, "invalid variable", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "vars", "Variable saved.", func(api API, id string) error {
+		return api.post("/service/"+id+"/settings/variable",
+			map[string]string{"variable": variable, "value": value})
+	})
+}
+
+func serverBucketCreate(w http.ResponseWriter, r *http.Request, s *session) {
+	name := r.PostFormValue("name")
+	if !reBucketName.MatchString(name) {
+		http.Error(w, "invalid bucket name", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "buckets", "Bucket created.", func(api API, id string) error {
+		return api.post("/service/"+id+"/buckets", map[string]string{"name": name})
+	})
+}
+
+func serverBucketDelete(w http.ResponseWriter, r *http.Request, s *session) {
+	name := r.PostFormValue("name")
+	if !reBucketName.MatchString(name) {
+		http.Error(w, "invalid bucket name", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "buckets", "Bucket deleted.", func(api API, id string) error {
+		return api.delete("/service/" + id + "/buckets/" + url.PathEscape(name))
+	})
+}
+
+func serverS3KeyCreate(w http.ResponseWriter, r *http.Request, s *session) {
+	serviceAction(w, r, s, "keys", "S3 key created.", func(api API, id string) error {
+		return api.post("/service/"+id+"/keys", nil)
+	})
+}
+
+func serverS3KeyDelete(w http.ResponseWriter, r *http.Request, s *session) {
+	key := r.PostFormValue("key")
+	if key == "" || badInput(key, 128) {
+		http.Error(w, "invalid key", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "keys", "S3 key deleted.", func(api API, id string) error {
+		return api.delete("/service/" + id + "/keys/" + url.PathEscape(key))
+	})
+}
+
+func serverSSHKeyAdd(w http.ResponseWriter, r *http.Request, s *session) {
+	name := strings.TrimSpace(r.PostFormValue("displayname"))
+	key := strings.TrimSpace(r.PostFormValue("key"))
+	if name == "" || len(name) > 64 || key == "" || len(key) > 4096 {
+		http.Error(w, "invalid ssh key", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "sshkeys", "SSH key added — restart the service to activate it.",
+		func(api API, id string) error {
+			return api.post("/service/"+id+"/sshkeys",
+				map[string]string{"displayname": name, "key": key})
+		})
+}
+
+func serverSSHKeyDelete(w http.ResponseWriter, r *http.Request, s *session) {
+	keyID := r.PostFormValue("id")
+	if !reUUID.MatchString(keyID) {
+		http.Error(w, "invalid key id", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "sshkeys", "SSH key removed.", func(api API, id string) error {
+		return api.delete("/service/" + id + "/sshkeys/" + url.PathEscape(keyID))
+	})
+}
+
+// serverPlesk fetches a one-shot Plesk login URL and forwards the browser.
+func serverPlesk(w http.ResponseWriter, r *http.Request, s *session) {
+	id := r.PathValue("id")
+	if !reUUID.MatchString(id) {
+		http.NotFound(w, r)
+		return
+	}
+	var out struct {
+		URL string `json:"url"`
+	}
+	err := (API{token: s.token}).get("/service/"+url.PathEscape(id)+"/plesklogin", &out)
+	if err != nil || !strings.HasPrefix(out.URL, "https://") {
+		if err == nil {
+			err = errors.New("no Plesk login URL returned")
+		}
+		apiFail(w, r, "/server/"+id, err)
+		return
+	}
+	http.Redirect(w, r, out.URL, http.StatusSeeOther)
+}
+
+func serverUnlockPorts(w http.ResponseWriter, r *http.Request, s *session) {
+	reason := strings.TrimSpace(r.PostFormValue("reason"))
+	if reason == "" || badInput(reason, 512) {
+		http.Error(w, "invalid reason", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "network", "Email ports unlocked.", func(api API, id string) error {
+		return api.post("/service/"+id+"/unlockports", map[string]string{"reason": reason})
+	})
+}
+
+// nextcloud only: in-place update and full data reset
+func serverNCUpdate(w http.ResponseWriter, r *http.Request, s *session) {
+	serviceAction(w, r, s, "", "Update started — this may take a few minutes.",
+		func(api API, id string) error { return api.post("/service/"+id+"/update", nil) })
+}
+
+func serverNCResetData(w http.ResponseWriter, r *http.Request, s *session) {
+	if r.PostFormValue("confirm") != "1" {
+		apiFail(w, r, "/server/"+r.PathValue("id")+"?tab=danger",
+			errors.New("confirm the data deletion first"))
+		return
+	}
+	serviceAction(w, r, s, "", "Reset started — all Nextcloud data is being wiped.",
+		func(api API, id string) error { return api.post("/service/"+id+"/resetdata", nil) })
+}
+
+/* ── gameserver files, mods, versions, ports; addons + upgrades ── */
+
+// filesTab builds the ?tab=files&dir=… redirect target so actions land back
+// in the directory they were issued from.
+func filesTab(dir string) string { return "files&dir=" + url.QueryEscape(dir) }
+
+func serverFileSave(w http.ResponseWriter, r *http.Request, s *session) {
+	p := remoteFile(r.PostFormValue("path"))
+	if p == "" {
+		http.Error(w, "invalid file path", http.StatusBadRequest)
+		return
+	}
+	// browsers CRLF-normalize textarea submissions; undo it or every save
+	// rewrites LF files (shebangs, yaml) with \r\n
+	data := strings.ReplaceAll(r.PostFormValue("data"), "\r\n", "\n")
+	serviceAction(w, r, s, filesTab(path.Dir(p))+"&file="+url.QueryEscape(p), "File saved.",
+		func(api API, id string) error {
+			return api.post("/service/"+id+"/file", map[string]string{"file": p, "data": data})
+		})
+}
+
+func serverFileDelete(w http.ResponseWriter, r *http.Request, s *session) {
+	p := remoteFile(strings.TrimSuffix(r.PostFormValue("path"), "/"))
+	if p == "" {
+		http.Error(w, "invalid file path", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, filesTab(path.Dir(p)), "Deleted.", func(api API, id string) error {
+		return api.post("/service/"+id+"/file/delete", map[string]string{"filepath": p})
+	})
+}
+
+func serverFileUnzip(w http.ResponseWriter, r *http.Request, s *session) {
+	name := r.PostFormValue("name")
+	dir := remoteDir(r.PostFormValue("dir"))
+	if name == "" || strings.ContainsAny(name, "/\\") || remoteFile(dir+name) == "" {
+		http.Error(w, "invalid file", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, filesTab(dir), "Unzipped.", func(api API, id string) error {
+		_, err := api.raw(http.MethodGet, "/service/"+id+"/file/unzip?file="+url.QueryEscape(name)+
+			"&path="+url.QueryEscape(dir), nil)
+		return err
+	})
+}
+
+// serverFileDownload fetches a one-shot download link and forwards to it.
+func serverFileDownload(w http.ResponseWriter, r *http.Request, s *session) {
+	id := r.PathValue("id")
+	p := remoteFile(r.PostFormValue("path"))
+	if !reUUID.MatchString(id) || p == "" {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	target := "/server/" + id + "?tab=" + filesTab(path.Dir(p))
+	var out struct {
+		Link string `json:"link"`
+	}
+	err := (API{token: s.token}).get("/service/"+url.PathEscape(id)+"/file/download?filepath="+
+		url.QueryEscape(p), &out)
+	if err != nil || !strings.HasPrefix(out.Link, "https://") {
+		if err == nil {
+			err = errors.New("no download link returned")
+		}
+		apiFail(w, r, target, err)
+		return
+	}
+	http.Redirect(w, r, out.Link, http.StatusSeeOther)
+}
+
+func modParam(w http.ResponseWriter, r *http.Request) (string, bool) {
+	m := strings.TrimSpace(r.PostFormValue("mod"))
+	if m == "" || badInput(m, 128) {
+		http.Error(w, "invalid mod", http.StatusBadRequest)
+		return "", false
+	}
+	return m, true
+}
+
+func serverModAdd(w http.ResponseWriter, r *http.Request, s *session) {
+	m, ok := modParam(w, r)
+	if !ok {
+		return
+	}
+	serviceAction(w, r, s, "mods", "Mod added.", func(api API, id string) error {
+		return api.post("/service/"+id+"/mod/add", map[string]string{"mod": m})
+	})
+}
+
+func serverModDelete(w http.ResponseWriter, r *http.Request, s *session) {
+	m, ok := modParam(w, r)
+	if !ok {
+		return
+	}
+	serviceAction(w, r, s, "mods", "Mod deleted.", func(api API, id string) error {
+		return api.post("/service/"+id+"/mod/delete", map[string]string{"mod": m})
+	})
+}
+
+func serverVersionChange(w http.ResponseWriter, r *http.Request, s *session) {
+	v := r.PostFormValue("version")
+	if v == "" || len(v) > 64 || r.PostFormValue("confirm") != "yes" {
+		http.Error(w, "invalid version change", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "vars", "Version change started.", func(api API, id string) error {
+		return api.post("/service/"+id+"/version", map[string]string{"version": v})
+	})
+}
+
+func serverGameChange(w http.ResponseWriter, r *http.Request, s *session) {
+	game, version := r.PostFormValue("game"), r.PostFormValue("version")
+	if game == "" || version == "" || len(game) > 64 || len(version) > 64 ||
+		r.PostFormValue("confirm") != "yes" {
+		http.Error(w, "invalid game change", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "vars", "Game change started — the server is being reinstalled.",
+		func(api API, id string) error {
+			return api.post("/service/"+id+"/gamechanger", map[string]string{"game": game, "version": version})
+		})
+}
+
+func serverExtraPort(w http.ResponseWriter, r *http.Request, s *session) {
+	serviceAction(w, r, s, "ports", "Extra port added.", func(api API, id string) error {
+		return api.post("/service/"+id+"/extraport", nil)
+	})
+}
+
+func serverSFTPReset(w http.ResponseWriter, r *http.Request, s *session) {
+	serviceAction(w, r, s, "", "SFTP login data reset.", func(api API, id string) error {
+		return api.post("/service/"+id+"/sftp/reset", nil)
+	})
+}
+
+func serverDBReset(w http.ResponseWriter, r *http.Request, s *session) {
+	serviceAction(w, r, s, "", "Database login data reset.", func(api API, id string) error {
+		return api.post("/service/"+id+"/db/reset", nil)
+	})
+}
+
+func serverAddonDelete(w http.ResponseWriter, r *http.Request, s *session) {
+	addon := r.PostFormValue("addon")
+	if !reUUID.MatchString(addon) {
+		http.Error(w, "invalid addon", http.StatusBadRequest)
+		return
+	}
+	serviceAction(w, r, s, "addons", "Addon deleted.", func(api API, id string) error {
+		return api.post("/service/"+id+"/addons/"+url.PathEscape(addon)+"/delete", nil)
+	})
+}
+
+// orderAndPay shares the addon/upgrade checkout: create the order with the
+// caller's form, then forward to the payment provider like the official panel.
+func orderAndPay(w http.ResponseWriter, r *http.Request, s *session, orderPath, tab string,
+	form map[string]string) {
+	id := r.PathValue("id")
+	if !reUUID.MatchString(id) {
+		http.NotFound(w, r)
+		return
+	}
+	target := "/server/" + id + "?tab=" + tab
+	method := payMethodByID(r.PostFormValue("method"))
+	if method == nil {
+		apiFail(w, r, target, errors.New("pick a payment method"))
+		return
+	}
+	api := API{token: s.token}
+	var inv InvoiceData
+	api.get("/user/"+url.PathEscape(s.userID)+"/invoicedata", &inv)
+	if inv.FirstName == "" || inv.LastName == "" || inv.Street == "" || inv.Zip == "" || inv.City == "" {
+		apiFail(w, r, target, errors.New("Please fill in and save your invoice data first (Settings → Invoice data)."))
+		return
+	}
+	form["credit"] = chk(r, "credit")
+	form["paymentmethod"] = method.ID
+	form["tax"] = string(inv.Country)
+	createAndPay(w, r, api, "/service/"+url.PathEscape(id)+orderPath, form, method.ID, target)
+}
+
+func serverAddonOrder(w http.ResponseWriter, r *http.Request, s *session) {
+	addon := r.PostFormValue("addon")
+	amount, err := strconv.Atoi(r.PostFormValue("amount"))
+	if addon == "" || len(addon) > 64 || err != nil || amount < 1 || amount > 100 {
+		http.Error(w, "invalid addon order", http.StatusBadRequest)
+		return
+	}
+	orderAndPay(w, r, s, "/addon/order", "addons",
+		map[string]string{"addon": addon, "amount": strconv.Itoa(amount)})
+}
+
+func serverUpgradeOrder(w http.ResponseWriter, r *http.Request, s *session) {
+	pkg := r.PostFormValue("package")
+	if pkg == "" || len(pkg) > 64 {
+		http.Error(w, "invalid upgrade", http.StatusBadRequest)
+		return
+	}
+	orderAndPay(w, r, s, "/upgrade", "billing", map[string]string{"package": pkg})
+}
+
+func serverCancelPlannedBackup(w http.ResponseWriter, r *http.Request, s *session) {
+	serviceAction(w, r, s, "backups", "Planned backup canceled.", func(api API, id string) error {
+		return api.post("/service/"+id+"/cancelplannedbackup", nil)
+	})
 }

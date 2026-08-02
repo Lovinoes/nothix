@@ -1,0 +1,45 @@
+{{define "content"}}
+{{with .Data}}
+<div class="page-head">
+  <h1 class="page-title">Ticket #{{.ID}}</h1>
+  <span class="page-sub">{{.Ticket.Title}}</span>
+  <span style="flex:1"></span>
+  {{if .Ticket.Status.Text}}<span class="chip {{ticketClass .Ticket.Status.BGColor}}">{{.Ticket.Status.Text}}</span>{{end}}
+</div>
+
+<section class="sec">
+  <h2 class="sec-label">Messages</h2>
+  {{if .Msgs}}
+  {{range .Msgs}}
+  <div class="card ticket-msg {{if .Admin}}ticket-msg-admin{{end}}">
+    <div class="ticket-msg-head">
+      <strong>{{if .Author}}{{.Author}}{{else}}—{{end}}</strong>
+      {{if .Admin}}<span class="chip ok">support</span>{{end}}
+      <span class="mono-sm" style="margin-left:auto">{{fmtUnixTime .Time}}</span>
+    </div>
+    <p class="ticket-msg-body">{{.Text}}</p>
+  </div>
+  {{end}}
+  {{else}}
+  <div class="card"><p class="mono-sm">No messages in this ticket.</p></div>
+  {{end}}
+</section>
+
+<section class="sec">
+  <h2 class="sec-label">Answer</h2>
+  <div class="card">
+    <form method="post" action="/tickets/{{.ID}}/answer">
+      <input type="hidden" name="csrf" value="{{$.CSRF}}">
+      <div class="field">
+        <label for="text">Your message</label>
+        <textarea id="text" name="text" rows="6" maxlength="10000" required></textarea>
+      </div>
+      <div class="btn-row">
+        <a class="btn" href="/tickets">back to tickets</a>
+        <button class="btn btn-primary" type="submit">send answer</button>
+      </div>
+    </form>
+  </div>
+</section>
+{{end}}
+{{end}}

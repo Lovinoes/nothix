@@ -250,6 +250,19 @@ if (accSvc) {
   accSvc.addEventListener('change', accSync);
   accSync();
 }
+/* game changer: only the selected game's version select is visible/submitted */
+var gameSel = document.getElementById('game-select');
+if (gameSel) {
+  var gameSync = function () {
+    document.querySelectorAll('.game-set').forEach(function (fs) {
+      var on = fs.getAttribute('data-game') === gameSel.value;
+      fs.hidden = !on;
+      fs.disabled = !on;
+    });
+  };
+  gameSel.addEventListener('change', gameSync);
+  gameSync();
+}
 /* permission trees: checking a sub checks its parent, unchecking a parent
    clears its subs (same behavior as the official panel) */
 document.querySelectorAll('.perm-set').forEach(function (fs) {

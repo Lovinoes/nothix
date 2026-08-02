@@ -22,7 +22,7 @@
   <table class="tbl">
     <tr><th></th><th>Product</th><th>Service ID</th><th>Duration</th><th>Status</th><th></th></tr>
     {{range .Services}}
-    <tr {{if and (isKVM .ProductDisplay) (not .DeleteDone)}}data-href="/server/{{.ID}}"{{end}}>
+    <tr {{if not .DeleteDone}}data-href="/server/{{.ID}}"{{end}}>
       <td>
         <form method="post" action="/services/{{.ID}}/fav">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
@@ -49,14 +49,12 @@
         {{else}}<span class="status pending" data-status-id="{{.ID}}">…</span>{{end}}
       </td>
       <td>
-        {{if and (isKVM .ProductDisplay) (not .DeleteDone)}}
-        <a class="btn" href="/server/{{.ID}}">manage</a>
-        {{else if .DeleteDone}}
+        {{if .DeleteDone}}
         <form method="post" action="/services/{{.ID}}/hide" data-confirm="Hide this deleted service from the list?">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
           <button class="btn" type="submit">hide</button>
         </form>
-        {{else}}<span class="mono-sm">official panel</span>{{end}}
+        {{else}}<a class="btn" href="/server/{{.ID}}">manage</a>{{end}}
       </td>
     </tr>
     {{end}}

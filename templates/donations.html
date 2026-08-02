@@ -24,7 +24,7 @@
   <div class="card">
     <form method="post" action="/donations/create">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
-      <div class="field-row" style="gap:6px;align-items:flex-end">
+      <div class="field-row bottom" style="gap:6px">
         <div class="field" style="margin:0;max-width:240px">
           <label for="dl-name">Name</label>
           <input type="text" id="dl-name" name="name" maxlength="64" required>
@@ -43,9 +43,9 @@
       <tr><th>Link</th><th>Created</th><th></th></tr>
       {{range .Links}}
       <tr>
-        <td><a href="https://datalix.de/cp/donate/{{.Name}}" target="_blank" rel="noopener" style="text-decoration:underline;text-underline-offset:3px"><strong>https://datalix.de/cp/donate/{{.Name}}</strong></a></td>
+        <td><a href="https://datalix.de/cp/donate/{{.Name}}" target="_blank" rel="noopener" class="u"><strong>https://datalix.de/cp/donate/{{.Name}}</strong></a></td>
         <td>{{fmtUnixTime .CreatedOn}}</td>
-        <td style="text-align:right">
+        <td class="r">
           <form method="post" action="/donations/delete" data-confirm="Delete donation link {{.Name}}? This cannot be undone.">
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
             <input type="hidden" name="id" value="{{.ID}}">
