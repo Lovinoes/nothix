@@ -11,7 +11,7 @@ official [Datalix API](https://apidoc.datalix.de/).
 > put it on the internet, run it behind nginx with SSL only. See
 > [Deploying it](#deploying-it).
 >
-> Vibecoded under human supervision by **Claude Fable 5** running ultracode (ultra steroids).
+> Vibecoded under human supervision by **Opus & Claude Fable 5** running ultracode (ultra steroids).
 
 > **Not affiliated with Datalix.**
 
