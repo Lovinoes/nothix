@@ -1,8 +1,5 @@
 {{define "content"}}
-<div class="page-head">
-  <h1 class="page-title">Donation links</h1>
-  <span class="page-sub">Accounting · Manage your donation links · Last 10 donations</span>
-</div>
+{{template "pagehead" (list "Donation links" "Accounting · Manage your donation links · Last 10 donations")}}
 
 {{with .Data}}
 <section class="sec">
@@ -48,8 +45,7 @@
         <td class="r">
           <form method="post" action="/donations/delete" data-confirm="Delete donation link {{.Name}}? This cannot be undone.">
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
-            <input type="hidden" name="id" value="{{.ID}}">
-            <button class="btn btn-danger" type="submit">delete</button>
+            <button class="btn btn-danger" type="submit" name="id" value="{{.ID}}">delete</button>
           </form>
         </td>
       </tr>

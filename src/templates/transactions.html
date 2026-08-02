@@ -1,8 +1,5 @@
 {{define "content"}}
-<div class="page-head">
-  <h1 class="page-title">Transactions</h1>
-  <span class="page-sub">Accounting · Your last credit movements</span>
-</div>
+{{template "pagehead" (list "Transactions" "Accounting · Your last credit movements")}}
 
 {{with .Data}}
 <section class="sec">

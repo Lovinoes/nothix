@@ -1,8 +1,5 @@
 {{define "content"}}
-<div class="page-head">
-  <h1 class="page-title">Emaillog</h1>
-  <span class="page-sub">The last 25 emails Datalix sent you</span>
-</div>
+{{template "pagehead" (list "Emaillog" "The last 25 emails Datalix sent you")}}
 
 {{with .Data}}
 <div class="card tbl-scroll">

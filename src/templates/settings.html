@@ -1,8 +1,5 @@
 {{define "content"}}
-<div class="page-head">
-  <h1 class="page-title">Settings</h1>
-  <span class="page-sub">Account · Security · Notifications</span>
-</div>
+{{template "pagehead" (list "Settings" "Account · Security · Notifications")}}
 
 {{with .Data}}
 <div class="tabs">
@@ -133,8 +130,7 @@
         <td>
           <form method="post" action="/account/sshkey/delete" data-confirm="Delete this SSH key? It is not removed from services already using it.">
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
-            <input type="hidden" name="id" value="{{.ID}}">
-            <button class="btn btn-danger" type="submit">delete</button>
+            <button class="btn btn-danger" type="submit" name="id" value="{{.ID}}">delete</button>
           </form>
         </td>
       </tr>
@@ -145,17 +141,7 @@
     {{end}}
     <form method="post" action="/account/sshkey">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
-      <div class="field-row">
-        <div class="field" style="max-width:200px">
-          <label for="displayname">Name</label>
-          <input type="text" id="displayname" name="displayname" maxlength="64" required>
-        </div>
-        <div class="field">
-          <label for="key">Public key</label>
-          <input type="text" id="key" name="key" placeholder="ssh-ed25519 AAAA… user@host" required>
-        </div>
-      </div>
-      <button class="btn" type="submit">add key</button>
+      {{template "sshkeyaddfields"}}
     </form>
   </div>
 </section>
@@ -172,7 +158,6 @@
   <div class="card">
     <form method="post" action="/settings/notify" class="censor">
       <input type="hidden" name="csrf" value="{{$.CSRF}}">
-      <input type="hidden" name="type" value="{{.Type}}">
       <p style="font-size:12px;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:12px">{{.DisplayName}}</p>
       <div class="check">
         <input type="checkbox" id="email-{{.Type}}" name="email" value="1" {{if .Email}}checked{{end}}>
@@ -188,7 +173,7 @@
           <input type="url" id="webhook-{{.Type}}" name="webhook" value="{{.Webhook}}" placeholder="https://example.com/hook">
         </div>
       </div>
-      <button class="btn" type="submit">save</button>
+      <button class="btn" type="submit" name="type" value="{{.Type}}">save</button>
     </form>
   </div>
   {{end}}
@@ -215,8 +200,7 @@
         <td>
           <form method="post" action="/settings/session/delete" data-confirm="Delete this session? The device is logged out of the official panel.">
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
-            <input type="hidden" name="id" value="{{.ID}}">
-            <button class="btn btn-danger" type="submit">delete</button>
+            <button class="btn btn-danger" type="submit" name="id" value="{{.ID}}">delete</button>
           </form>
         </td>
       </tr>

@@ -1,8 +1,5 @@
 {{define "content"}}
-<div class="page-head">
-  <h1 class="page-title">Invoices</h1>
-  <span class="page-sub">Accounting · Your invoices</span>
-</div>
+{{template "pagehead" (list "Invoices" "Accounting · Your invoices")}}
 
 {{with .Data}}
 <section class="sec">

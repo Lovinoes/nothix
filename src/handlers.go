@@ -10,6 +10,7 @@ import (
 	"html"
 	"log"
 	"maps"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -35,6 +36,8 @@ var (
 	reHostname = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$`)
 	reNotify   = regexp.MustCompile(`^[a-z0-9_-]{1,32}$`)
 	reTag      = regexp.MustCompile(`<[^>]*>`)
+	// anything that has no business in a Content-Disposition filename
+	reUnsafeName = regexp.MustCompile(`[^A-Za-z0-9_-]`)
 )
 
 // The API's activity feed embeds the official panel's HTML markup. Strip it to
@@ -70,11 +73,17 @@ func loginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
-	renderLogin(w, r, r.URL.Query().Get("err"), http.StatusOK)
+	// a fixed code, not text: anything echoed here would appear in the panel's
+	// own alert box directly above the API key field
+	errMsg := ""
+	if r.URL.Query().Get("err") == "rejected" {
+		errMsg = "Your API key was rejected — please sign in again."
+	}
+	renderLogin(w, r, errMsg, http.StatusOK)
 }
 
 func loginSubmit(w http.ResponseWriter, r *http.Request) {
-	if !allowLogin(r.RemoteAddr) {
+	if !allowLogin(clientIP(r)) {
 		renderLogin(w, r, "Too many attempts — wait a few minutes.", http.StatusTooManyRequests)
 		return
 	}
@@ -145,8 +154,7 @@ func loginSubmit(w http.ResponseWriter, r *http.Request) {
 // vd builds the common view data every authenticated page shares.
 func vd(title, page string, s *session, r *http.Request) viewData {
 	v := viewData{Title: title, Page: page, CSRF: s.csrf, User: s.username}
-	v.Msg = r.URL.Query().Get("msg")
-	v.Err = r.URL.Query().Get("err")
+	v.Msg, v.Err = takeFlash(r)
 	return v
 }
 
@@ -319,50 +327,33 @@ func upgradeRowOf(m map[string]any) upgradeRow {
 	for _, k := range []string{"id", "displayname", "monthlyprice", "onetimepayment", "active", "line"} {
 		delete(m, k)
 	}
-	var parts []string
-	for _, kv := range kvRows(m) {
-		parts = append(parts, kv.K+" "+kv.V)
-	}
-	row.Details = strings.Join(parts, " · ")
+	row.Details = strings.Join(kvParts(m), " · ")
 	return row
 }
 
-type kvRow struct{ K, V string }
-
-// kvRows flattens an unknown-shape API object (scalars plus one level of
+// kvParts flattens an unknown-shape API object (scalars plus one level of
 // object arrays, like the per-product fields of an upgrade offer) for display.
-func kvRows(raw map[string]any) []kvRow {
-	flat := func(m map[string]any) string {
-		var parts []string
-		for _, k := range slices.Sorted(maps.Keys(m)) {
-			switch m[k].(type) {
-			case string, float64, bool:
-				parts = append(parts, fmt.Sprintf("%s %v", k, m[k]))
-			}
-		}
-		return strings.Join(parts, ", ")
-	}
-	var rows []kvRow
-	for k, v := range raw {
-		switch vv := v.(type) {
+func kvParts(raw map[string]any) []string {
+	var parts []string
+	for _, k := range slices.Sorted(maps.Keys(raw)) {
+		switch v := raw[k].(type) {
 		case string, float64, bool:
-			rows = append(rows, kvRow{k, fmt.Sprint(vv)})
+			parts = append(parts, fmt.Sprintf("%s %v", k, v))
 		case []any:
 			var lines []string
-			for _, it := range vv {
+			for _, it := range v {
 				if m, ok := it.(map[string]any); ok {
-					lines = append(lines, flat(m))
+					lines = append(lines, strings.Join(kvParts(m), ", "))
 				} else {
 					lines = append(lines, fmt.Sprint(it))
 				}
 			}
 			if len(lines) > 0 {
-				rows = append(rows, kvRow{k, strings.Join(lines, " · ")})
+				parts = append(parts, k+" "+strings.Join(lines, " · "))
 			}
 		}
 	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].K < rows[j].K })
-	return rows
+	return parts
 }
 
 var serverTabs = map[string]bool{"network": true, "hardware": true, "live": true,
@@ -557,22 +548,14 @@ func ordersPage(w http.ResponseWriter, r *http.Request, s *session) {
 	render(w, "orders", v)
 }
 
-type accountView struct {
-	Invoices []Invoice
-}
-
 func accountPage(w http.ResponseWriter, r *http.Request, s *session) {
-	api := API{token: s.token}
-	u := "/user/" + url.PathEscape(s.userID)
-
-	av := accountView{}
-	if err := api.get(u+"/invoice/list", &av.Invoices); isAuthError(err) {
+	var invoices []Invoice
+	if err := (API{token: s.token}).get("/user/"+url.PathEscape(s.userID)+"/invoice/list", &invoices); isAuthError(err) {
 		apiFail(w, r, "/account", err)
 		return
 	}
-
 	v := vd("Invoices", "account", s, r)
-	v.Data = av
+	v.Data = struct{ Invoices []Invoice }{invoices}
 	render(w, "account", v)
 }
 
@@ -596,12 +579,7 @@ func invoiceView(w http.ResponseWriter, r *http.Request, s *session) {
 			return
 		}
 	}
-	name := strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
-			return r
-		}
-		return -1
-	}, id)
+	name := reUnsafeName.ReplaceAllString(id, "")
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", `inline; filename="invoice-`+name+`.pdf"`)
 	w.Write(data)
@@ -676,17 +654,6 @@ func donationLinkCreate(w http.ResponseWriter, r *http.Request, s *session) {
 	})
 }
 
-func donationLinkDelete(w http.ResponseWriter, r *http.Request, s *session) {
-	id := r.PostFormValue("id")
-	if !reUUID.MatchString(id) {
-		http.Error(w, "invalid link id", http.StatusBadRequest)
-		return
-	}
-	userAction(w, r, s, "/donations", "Donation link deleted.", func(api API, uid string) error {
-		return api.delete("/user/" + uid + "/credit/donation/link/" + id)
-	})
-}
-
 type affiliateView struct {
 	Info  AffiliateInfo
 	Links []AffiliateLink
@@ -718,17 +685,6 @@ func affiliateLinkCreate(w http.ResponseWriter, r *http.Request, s *session) {
 	}
 	userAction(w, r, s, "/affiliate", "Affiliate link created.", func(api API, uid string) error {
 		return api.post("/user/"+uid+"/affiliate", map[string]string{"name": name})
-	})
-}
-
-func affiliateLinkDelete(w http.ResponseWriter, r *http.Request, s *session) {
-	id := r.PostFormValue("id")
-	if !reUUID.MatchString(id) {
-		http.Error(w, "invalid link id", http.StatusBadRequest)
-		return
-	}
-	userAction(w, r, s, "/affiliate", "Affiliate link deleted.", func(api API, uid string) error {
-		return api.delete("/user/" + uid + "/affiliate/" + id)
 	})
 }
 
@@ -1267,6 +1223,20 @@ func userAction(w http.ResponseWriter, r *http.Request, s *session, target, okMs
 	flashOK(w, r, target, okMsg)
 }
 
+// idDelete handles the "DELETE /user/{id}<sub><posted id>" actions that differ
+// only by path and flash message.
+func idDelete(sub, target, okMsg string) func(http.ResponseWriter, *http.Request, *session) {
+	return func(w http.ResponseWriter, r *http.Request, s *session) {
+		id, ok := formUUID(w, r, "id")
+		if !ok {
+			return
+		}
+		userAction(w, r, s, target, okMsg, func(api API, uid string) error {
+			return api.delete("/user/" + uid + sub + url.PathEscape(id))
+		})
+	}
+}
+
 // chk normalizes a checkbox to the "0"/"1" the API expects.
 func chk(r *http.Request, k string) string {
 	if r.PostFormValue(k) == "1" {
@@ -1342,17 +1312,6 @@ func settingsTwofaFinish(w http.ResponseWriter, r *http.Request, s *session) {
 func settingsTwofaRemove(w http.ResponseWriter, r *http.Request, s *session) {
 	userAction(w, r, s, "/settings", "Two-factor authentication removed.", func(api API, uid string) error {
 		return api.post("/user/"+uid+"/twofa/remove", nil)
-	})
-}
-
-func settingsSessionDelete(w http.ResponseWriter, r *http.Request, s *session) {
-	id := r.PostFormValue("id")
-	if !reUUID.MatchString(id) {
-		http.Error(w, "invalid session id", http.StatusBadRequest)
-		return
-	}
-	userAction(w, r, s, "/settings?tab=sessions", "Session deleted.", func(api API, uid string) error {
-		return api.delete("/user/" + uid + "/sessions/" + url.PathEscape(id))
 	})
 }
 
@@ -1463,17 +1422,19 @@ func servicePost(path, tab, okMsg string) func(http.ResponseWriter, *http.Reques
 	}
 }
 
-func backupParam(w http.ResponseWriter, r *http.Request) (string, bool) {
-	b := r.PostFormValue("backup")
-	if !reUUID.MatchString(b) {
-		http.Error(w, "invalid backup id", http.StatusBadRequest)
+// formUUID reads a POST field that has to be an id, answering 400 itself when
+// it is not one.
+func formUUID(w http.ResponseWriter, r *http.Request, name string) (string, bool) {
+	v := r.PostFormValue(name)
+	if !reUUID.MatchString(v) {
+		http.Error(w, "invalid id", http.StatusBadRequest)
 		return "", false
 	}
-	return b, true
+	return v, true
 }
 
 func serverBackupDelete(w http.ResponseWriter, r *http.Request, s *session) {
-	b, ok := backupParam(w, r)
+	b, ok := formUUID(w, r, "backup")
 	if !ok {
 		return
 	}
@@ -1483,7 +1444,7 @@ func serverBackupDelete(w http.ResponseWriter, r *http.Request, s *session) {
 }
 
 func serverBackupRestore(w http.ResponseWriter, r *http.Request, s *session) {
-	b, ok := backupParam(w, r)
+	b, ok := formUUID(w, r, "backup")
 	if !ok {
 		return
 	}
@@ -1666,7 +1627,7 @@ func serverUplink(w http.ResponseWriter, r *http.Request, s *session) {
 }
 
 func serverBackupRename(w http.ResponseWriter, r *http.Request, s *session) {
-	b, ok := backupParam(w, r)
+	b, ok := formUUID(w, r, "backup")
 	if !ok {
 		return
 	}
@@ -1682,7 +1643,7 @@ func serverBackupRename(w http.ResponseWriter, r *http.Request, s *session) {
 
 // serverBackupLock locks (lock=1) or unlocks a backup against cron cleanup.
 func serverBackupLock(w http.ResponseWriter, r *http.Request, s *session) {
-	b, ok := backupParam(w, r)
+	b, ok := formUUID(w, r, "backup")
 	if !ok {
 		return
 	}
@@ -1764,9 +1725,8 @@ func scaleTrafficBars(pts []TrafficPoint) {
 
 // serverISOMountStd inserts a Datalix-provided ISO (stops the server).
 func serverISOMountStd(w http.ResponseWriter, r *http.Request, s *session) {
-	isoID := r.PostFormValue("iso")
-	if !reUUID.MatchString(isoID) {
-		http.Error(w, "invalid iso id", http.StatusBadRequest)
+	isoID, ok := formUUID(w, r, "iso")
+	if !ok {
 		return
 	}
 	serviceAction(w, r, s, "settings", "ISO inserted — start the server manually.", func(api API, id string) error {
@@ -1794,9 +1754,8 @@ func serverCustomISOAdd(w http.ResponseWriter, r *http.Request, s *session) {
 
 // serverCustomISOMount mounts or unmounts a custom ISO (same endpoint toggles).
 func serverCustomISOMount(w http.ResponseWriter, r *http.Request, s *session) {
-	isoID := r.PostFormValue("iso")
-	if !reUUID.MatchString(isoID) {
-		http.Error(w, "invalid iso id", http.StatusBadRequest)
+	isoID, ok := formUUID(w, r, "iso")
+	if !ok {
 		return
 	}
 	serviceAction(w, r, s, "settings", "ISO mount state changed.", func(api API, id string) error {
@@ -1805,9 +1764,8 @@ func serverCustomISOMount(w http.ResponseWriter, r *http.Request, s *session) {
 }
 
 func serverCustomISODelete(w http.ResponseWriter, r *http.Request, s *session) {
-	isoID := r.PostFormValue("iso")
-	if !reUUID.MatchString(isoID) {
-		http.Error(w, "invalid iso id", http.StatusBadRequest)
+	isoID, ok := formUUID(w, r, "iso")
+	if !ok {
 		return
 	}
 	serviceAction(w, r, s, "settings", "Custom ISO deleted.", func(api API, id string) error {
@@ -1840,17 +1798,6 @@ func accountSSHKeyAdd(w http.ResponseWriter, r *http.Request, s *session) {
 	}
 	userAction(w, r, s, "/settings?tab=sshkeys", "SSH key added.", func(api API, uid string) error {
 		return api.post("/user/"+uid+"/sshkeys", map[string]string{"displayname": name, "key": key})
-	})
-}
-
-func accountSSHKeyDelete(w http.ResponseWriter, r *http.Request, s *session) {
-	id := r.PostFormValue("id")
-	if !reUUID.MatchString(id) {
-		http.Error(w, "invalid key id", http.StatusBadRequest)
-		return
-	}
-	userAction(w, r, s, "/settings?tab=sshkeys", "SSH key deleted.", func(api API, uid string) error {
-		return api.delete("/user/" + uid + "/sshkeys/" + url.PathEscape(id))
 	})
 }
 
@@ -1945,11 +1892,109 @@ func apiLive(w http.ResponseWriter, r *http.Request, s *session) {
 	cachedAPI(w, r, s, "live", "/livedata", 45*time.Second, &ld)
 }
 
+/* ── generic API proxy ──────────────────────────────────────────────────
+   /api/proxy/<datalix path> forwards to the Datalix API and hands the
+   response straight back, so the frontend fetches this panel instead of
+   backend.datalix.de. The token is attached server-side and still never
+   reaches the browser.
+
+   Reads are plain GETs. Writes carry the same CSRF and Origin checks as
+   every form POST in the panel: unlike the page handlers this one reaches
+   every API route there is, so the gate has to be at least as strict. */
+
+var proxyMethods = map[string]bool{
+	http.MethodGet:    true,
+	http.MethodPost:   true,
+	http.MethodDelete: true,
+}
+
+func proxyAPI(w http.ResponseWriter, r *http.Request) {
+	s := getSession(r)
+	if s == nil {
+		// 401 rather than the usual redirect: fetch() cannot tell a login
+		// page from data, so answer in a shape the caller can branch on
+		writeJSON(w, http.StatusUnauthorized, []byte(`{"error":"not signed in"}`))
+		return
+	}
+	if !proxyMethods[r.Method] {
+		writeJSON(w, http.StatusMethodNotAllowed, []byte(`{"error":"method not allowed"}`))
+		return
+	}
+
+	var form url.Values
+	if r.Method != http.MethodGet {
+		// raw builds the upstream multipart itself, so callers send a plain
+		// form. Refuse anything else rather than forward a request with the
+		// fields silently missing.
+		ct, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		if r.ContentLength != 0 && ct != "application/x-www-form-urlencoded" {
+			writeJSON(w, http.StatusUnsupportedMediaType,
+				[]byte(`{"error":"body must be application/x-www-form-urlencoded"}`))
+			return
+		}
+		if !postGuard(w, r, s.csrf) {
+			return
+		}
+		form = r.PostForm
+		form.Del("csrf") // ours, not the API's
+		if r.Method != http.MethodPost {
+			form = nil // a DELETE carries no body at all
+		}
+	}
+
+	path, ok := proxyPath(r.PathValue("path"), r.URL.Query())
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, []byte(`{"error":"bad path"}`))
+		return
+	}
+
+	data, err := API{token: s.token}.raw(r.Method, path, form)
+	if err == nil {
+		writeJSON(w, http.StatusOK, data)
+		return
+	}
+	var ae *apiError
+	switch {
+	case isAuthError(err):
+		dropSession(w, r)
+		writeJSON(w, http.StatusUnauthorized, []byte(`{"error":"API key rejected"}`))
+	case errors.As(err, &ae):
+		body, _ := json.Marshal(map[string]string{"error": ae.msg})
+		writeJSON(w, ae.status, body)
+	default:
+		writeJSON(w, http.StatusBadGateway, []byte(`{"error":"Datalix API unreachable"}`))
+	}
+}
+
+// proxyPath rebuilds the upstream path from the wildcard segment and carries
+// the caller's query string along, minus anything that could shadow our auth.
+func proxyPath(rest string, q url.Values) (string, bool) {
+	if rest == "" || strings.Contains(rest, "..") {
+		return "", false
+	}
+	// PathValue hands back the decoded path, so re-escape segment by segment:
+	// an encoded slash from the caller must not become a separator upstream.
+	segs := strings.Split(rest, "/")
+	for i, seg := range segs {
+		if seg == "" {
+			return "", false
+		}
+		segs[i] = url.PathEscape(seg)
+	}
+	q.Del("token") // raw appends the real one
+	path := "/" + strings.Join(segs, "/")
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	return path, true
+}
+
 /* ── access manager ── */
 
 type accessPermGroup struct {
 	PID   string
 	Perms []AccessPerm
+	Has   map[string]bool // always nil: the create dialog starts unchecked, shared define needs the field
 }
 
 type accessRow struct {
@@ -2074,9 +2119,8 @@ func accessEdit(w http.ResponseWriter, r *http.Request, s *session) {
 // accessAction handles delete (verb "") plus accept/deny on an access id.
 func accessAction(verb, okMsg string) func(http.ResponseWriter, *http.Request, *session) {
 	return func(w http.ResponseWriter, r *http.Request, s *session) {
-		id := r.PostFormValue("id")
-		if !reUUID.MatchString(id) {
-			http.Error(w, "invalid access id", http.StatusBadRequest)
+		id, ok := formUUID(w, r, "id")
+		if !ok {
 			return
 		}
 		userAction(w, r, s, "/access", okMsg, func(api API, uid string) error {
@@ -2120,9 +2164,8 @@ func serverSSHKeyAdd(w http.ResponseWriter, r *http.Request, s *session) {
 }
 
 func serverSSHKeyDelete(w http.ResponseWriter, r *http.Request, s *session) {
-	keyID := r.PostFormValue("id")
-	if !reUUID.MatchString(keyID) {
-		http.Error(w, "invalid key id", http.StatusBadRequest)
+	keyID, ok := formUUID(w, r, "id")
+	if !ok {
 		return
 	}
 	serviceAction(w, r, s, "sshkeys", "SSH key removed.", func(api API, id string) error {
@@ -2144,9 +2187,8 @@ func serverUnlockPorts(w http.ResponseWriter, r *http.Request, s *session) {
 /* ── addons + upgrades ── */
 
 func serverAddonDelete(w http.ResponseWriter, r *http.Request, s *session) {
-	addon := r.PostFormValue("addon")
-	if !reUUID.MatchString(addon) {
-		http.Error(w, "invalid addon", http.StatusBadRequest)
+	addon, ok := formUUID(w, r, "addon")
+	if !ok {
 		return
 	}
 	serviceAction(w, r, s, "addons", "Addon deleted.", func(api API, id string) error {

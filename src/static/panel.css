@@ -201,14 +201,14 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .hero-chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .hero-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
-.chip {
+.chip, .status {
   display: inline-flex; align-items: center; gap: 6px;
   height: 22px; padding: 0 9px;
   border: 1px solid var(--line-2); border-radius: 999px;
   font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
-  color: var(--fg-2); white-space: nowrap;
+  color: var(--fg-2); white-space: nowrap; width: fit-content;
 }
-.chip::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; }
+.chip::before, .status::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; }
 .chip.ok, .status.running   { color: var(--green); border-color: rgba(61,220,132,0.35); }
 .chip.ok::before, .status.running::before { animation: livepulse 1.8s infinite; }
 .chip.warn, .status.pending { color: var(--amber); border-color: rgba(255,176,32,0.35); }
@@ -246,22 +246,15 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 }
 
 /* ── CARDS ── */
-.card {
-  background: var(--bg-1);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  padding: 16px;
-}
+/* one panel surface for every card variant; the blocks below add only layout */
+.card, .srv-card, .stat, .login-card, .pay-card { background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-lg); }
+.card { padding: 16px; }
 .card + .card { margin-top: 12px; }
 
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
 
 .srv-card {
-  display: flex; flex-direction: column; gap: 10px;
-  background: var(--bg-1);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  padding: 16px;
+  display: flex; flex-direction: column; gap: 10px; padding: 16px;
   transition: border-color 0.12s, background 0.12s;
 }
 .srv-card:hover { border-color: var(--fg-4); background: var(--bg-2); }
@@ -296,34 +289,22 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .reveal summary::before { content: '▸ '; color: var(--fg-4); }
 .reveal[open] summary::before { content: '▾ '; }
 .reveal summary:hover { color: var(--fg); }
-.blur { filter: blur(5px); transition: filter 0.3s ease; }
-.blur:hover { filter: none; }
 @media (max-width: 900px) {
   .srv-layout { grid-template-columns: 1fr; }
   .srv-layout > aside { position: static; }
 }
 
 /* ── STATUS BADGES ── */
-.status {
-  display: inline-flex; align-items: center; gap: 6px;
-  height: 20px; padding: 0 8px;
-  border: 1px solid var(--line-2); border-radius: 999px;
-  font-family: var(--font-ui);
-  font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
-  color: var(--fg-2); white-space: nowrap;
-  width: fit-content;
-}
-.status::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+/* a .chip one size down; the shared rule up top carries the rest */
+.status { height: 20px; padding: 0 8px; }
 .status.pending::before { animation: blink 1s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0.2; } }
 
 /* ── STAT TILES ── */
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
 .stat {
-  background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-lg);
   padding: 14px;
-  display: flex; flex-direction: column; gap: 8px;
-  min-height: 96px;
+  display: flex; flex-direction: column; gap: 8px; min-height: 96px;
 }
 .stat-k { font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--fg-3); }
 .stat-v {
@@ -480,13 +461,7 @@ select option { background: var(--bg-2); color: var(--fg); }
   display: grid; place-items: center;
   padding: 24px;
 }
-.login-card {
-  width: min(430px, 100%);
-  background: var(--bg-1);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  padding: 36px 32px;
-}
+.login-card { width: min(430px, 100%); padding: 36px 32px; }
 .login-mark {
   width: 46px; height: 46px; margin-bottom: 20px;
   display: grid; grid-template: repeat(2, 1fr) / repeat(2, 1fr); gap: 6px;
@@ -574,13 +549,8 @@ select option { background: var(--bg-2); color: var(--fg); }
 .pay-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .pay-card {
   display: flex; flex-direction: column; gap: 4px; align-items: center;
-  background: var(--bg-1);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
   padding: 18px 12px;
-  color: var(--fg);
-  font-family: var(--font-ui); font-size: 13px;
-  cursor: pointer;
+  color: var(--fg); font-family: var(--font-ui); font-size: 13px; cursor: pointer;
   transition: border-color 0.12s, background 0.12s, transform 0.12s;
 }
 .pay-card:hover, .pay-card:focus-visible { border-color: var(--fg-4); background: var(--bg-2); transform: translateY(-1px); }
@@ -630,21 +600,20 @@ dialog.modal[open]::backdrop { opacity: 1; }
 dialog.modal.modal-sm { width: min(440px, 92vw); }
 
 /* ── LOGIN RISK NOTICE + THIRD-PARTY FOOTER ── */
-.login-risk {
+/* signal notice: the accent arrives via color, box and dot pick it up */
+.login-risk, .notice-warn {
   display: flex; align-items: center; gap: 8px;
-  margin-top: 16px;
-  border: 1px solid var(--red);
-  border-radius: var(--r);
-  background: rgba(215, 25, 33, 0.10);
+  border: 1px solid currentColor; border-radius: var(--r);
   padding: 8px 10px;
-  font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
-  color: var(--red);
 }
-.login-risk::before {
+.login-risk::before, .notice-warn::before {
   content: ''; width: 6px; height: 6px; border-radius: 50%;
-  background: var(--red); flex: none;
+  background: currentColor; flex: none;
   animation: livepulse 1.4s infinite;
 }
+.login-risk { margin-top: 16px; background: rgba(215, 25, 33, 0.10); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--red); }
+/* amber notice: noVNC redirect hint etc. */
+.notice-warn { margin-bottom: 14px; background: rgba(255, 176, 32, 0.10); font-size: 11px; letter-spacing: 0.04em; color: var(--amber); }
 .footer-notice a { color: var(--fg-2); text-decoration: underline; text-underline-offset: 3px; }
 
 /* ── SERVER PAGE: sidebar login data, live charts, traffic bars ── */
@@ -669,35 +638,16 @@ dialog.modal.modal-sm { width: min(440px, 92vw); }
 .bars i.in { background: var(--green); }
 .bars i.out { background: var(--fg-3); }
 
-/* amber notice (noVNC redirect hint etc.) — same shape as the login risk box */
-.notice-warn {
-  display: flex; align-items: center; gap: 8px;
-  border: 1px solid var(--amber);
-  border-radius: var(--r);
-  background: rgba(255, 176, 32, 0.10);
-  padding: 8px 10px;
-  font-size: 11px; letter-spacing: 0.04em;
-  color: var(--amber);
-  margin-bottom: 14px;
-}
-.notice-warn::before {
-  content: ''; width: 6px; height: 6px; border-radius: 50%;
-  background: var(--amber); flex: none;
-  animation: livepulse 1.4s infinite;
-}
-
 /* ── censored values (blur until hover/focus) ── */
-.blur:focus-visible, .blur:focus-within { filter: none; }
+.blur { filter: blur(5px); transition: filter 0.3s ease; }
+.blur:is(:hover, :focus-visible, :focus-within) { filter: none; }
+form.censor :is(input[type="text"], input[type="url"]) { filter: blur(4px); transition: filter 0.3s ease; }
+form.censor :is(input[type="text"], input[type="url"]):is(:hover, :focus) { filter: none; }
 .pin-copy {
   background: none; border: 0; padding: 0;
   font: inherit; letter-spacing: inherit; color: inherit;
   cursor: pointer;
 }
-form.censor input[type="text"], form.censor input[type="url"] {
-  filter: blur(4px); transition: filter 0.3s ease;
-}
-form.censor input[type="text"]:hover, form.censor input[type="text"]:focus,
-form.censor input[type="url"]:hover, form.censor input[type="url"]:focus { filter: none; }
 
 /* small "+" next to the credit value → top up */
 .stat-add {

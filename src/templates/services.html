@@ -1,8 +1,5 @@
 {{define "content"}}
-<div class="page-head">
-  <h1 class="page-title">Service Overview</h1>
-  <span class="page-sub">Manage services · live status</span>
-</div>
+{{template "pagehead" (list "Service Overview" "Manage services · live status")}}
 
 {{with .Data}}
 <div class="tabs">
@@ -26,8 +23,7 @@
       <td>
         <form method="post" action="/services/{{.ID}}/fav">
           <input type="hidden" name="csrf" value="{{$.CSRF}}">
-          <input type="hidden" name="on" value="{{if .Fav}}0{{else}}1{{end}}">
-          <button class="fav-btn {{if .Fav}}on{{end}}" type="submit" title="Toggle favorite" aria-label="Toggle favorite">{{if .Fav}}★{{else}}☆{{end}}</button>
+          <button class="fav-btn {{if .Fav}}on{{end}}" type="submit" name="on" value="{{if .Fav}}0{{else}}1{{end}}" title="Toggle favorite" aria-label="Toggle favorite">{{if .Fav}}★{{else}}☆{{end}}</button>
         </form>
       </td>
       <td>

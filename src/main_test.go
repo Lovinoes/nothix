@@ -94,7 +94,8 @@ func mockDatalix(t *testing.T) *httptest.Server {
 			json(w, `[{"link":"afflink","amount":2.5,"status":0,"created_on":1718000000},
 				{"link":"afflink","amount":3.5,"status":1,"created_on":1718000500}]`)
 		case r.Method == "POST" && r.URL.Path == "/user/"+testUID+"/affiliate":
-			if r.FormValue("name") != "partner" {
+			// csrf is the panel's own field and must never be forwarded
+			if r.FormValue("name") != "partner" || r.FormValue("csrf") != "" {
 				w.WriteHeader(400)
 				json(w, `{"error":"bad affiliate name"}`)
 				return
@@ -103,6 +104,11 @@ func mockDatalix(t *testing.T) *httptest.Server {
 		case r.URL.Path == "/user/"+testUID+"/affiliate":
 			json(w, `[{"id":"7c1d2e3f-0a5b-4c6d-8e9f-1a2b3c4d5e6f","name":"afflink","servicecount":3,"servicerevenue":"12.34","percent":10}]`)
 		case r.Method == "DELETE" && r.URL.Path == "/user/"+testUID+"/affiliate/7c1d2e3f-0a5b-4c6d-8e9f-1a2b3c4d5e6f":
+			if r.ContentLength != 0 { // a DELETE must not carry a body
+				w.WriteHeader(400)
+				json(w, `{"error":"unexpected body on delete"}`)
+				return
+			}
 			json(w, `[]`)
 		case r.URL.Path == "/user/"+testUID+"/countrys":
 			json(w, `[{"id":"c-de","displayname":"Germany","vatamount":"19","ewr":1},
@@ -338,6 +344,25 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 		t.Fatalf("login did not land on overview: %s (body: %.200s)", resp.Request.URL, body)
 	}
 
+	// a second visitor is a second session: signing in here signs in nobody else
+	otherJar, _ := cookiejar.New(nil)
+	stranger := &http.Client{Jar: otherJar}
+	resp, err = stranger.Get(panel.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := readBody(t, resp); !strings.HasSuffix(resp.Request.URL.Path, "/login") || strings.Contains(b, "483920") {
+		t.Fatal("a second visitor inherited the first one's session")
+	}
+	resp, err = stranger.Get(panel.URL + "/api/proxy/user/" + testUID + "/dashboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	readBody(t, resp)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("proxy served a session-less visitor: %d", resp.StatusCode)
+	}
+
 	// one token is enough: the session CSRF never rotates
 	sessCSRF := findSessionCSRF(t, client, panel.URL)
 	get := func(path string) string {
@@ -474,9 +499,36 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 		t.Fatalf("topup redirect: got %q", loc)
 	}
 
-	// topup without the consents → bounced back with an error, no API call
-	if loc := postLoc("/credit/topup", url.Values{"method": {"paypal"}, "amount": {"25"}}); !strings.HasPrefix(loc, "/credit?err=") {
-		t.Fatalf("topup without consents should flash an error, got %q", loc)
+	// topup without the consents → bounced back with an error, no API call.
+	// The text rides on the session: a flash in the URL could be mailed to a
+	// victim as a link and would render in the panel's own alert box.
+	if loc := postLoc("/credit/topup", url.Values{"method": {"paypal"}, "amount": {"25"}}); loc != "/credit" {
+		t.Fatalf("topup without consents should bounce back to /credit, got %q", loc)
+	}
+	want(get("/credit"), "Please accept the terms, the privacy policy")
+	if b := get("/credit"); strings.Contains(b, "Please accept the terms") {
+		t.Fatal("flash message survived being read once")
+	}
+	for _, u := range []string{"/credit?err=INJECTED", "/credit?msg=INJECTED"} {
+		if strings.Contains(get(u), "INJECTED") {
+			t.Fatalf("%s echoed attacker-supplied flash text", u)
+		}
+	}
+	// the login page is the one that matters: unauthenticated, and the banner
+	// sits directly above the API key field. Use a session-less client, an
+	// authenticated one gets redirected away before the page renders.
+	for _, q := range []string{"?err=INJECTED", "?err=rejected"} {
+		resp, err = stranger.Get(panel.URL + "/login" + q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b := readBody(t, resp)
+		if strings.Contains(b, "INJECTED") {
+			t.Fatal("login page echoed attacker-supplied flash text")
+		}
+		if q == "?err=rejected" && !strings.Contains(b, "API key was rejected") {
+			t.Fatal("the rejected sentinel no longer renders its message")
+		}
 	}
 
 	// purchase by invoice page: stats, unpaid positions, own invoices, pay options
@@ -484,7 +536,7 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 	want(body, "4.99", "Active")
 	want(body, "KVM Server", `data-transaction="31337"`)
 	want(body, "june bundle", "Pay with credit")
-	if strings.Count(body, `class="btn pbi-edit"`) != 1 {
+	if strings.Count(body, `data-dlg="pbi-edit-modal"`) != 1 {
 		t.Fatal("edit button should exist for the custom invoice only, not for default")
 	}
 
@@ -596,6 +648,101 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 	}
 	flash("/tickets/4821/answer", "Answer sent", url.Values{"text": {"thanks!"}})
 
+	// ── /api/proxy passthrough ──
+	proxy := func(path string) (int, string, string) {
+		t.Helper()
+		resp, err := client.Get(panel.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp.StatusCode, resp.Header.Get("Content-Type"), readBody(t, resp)
+	}
+
+	// the token JS needs for proxy writes is on the page
+	want(get("/"), `<meta name="csrf" content="`+sessCSRF+`">`)
+
+	// GET is forwarded and the upstream JSON comes back untouched
+	code, ctype, pbody := proxy("/api/proxy/user/" + testUID + "/dashboard")
+	if code != http.StatusOK || !strings.Contains(ctype, "application/json") {
+		t.Fatalf("proxy GET: %d %q", code, ctype)
+	}
+	want(pbody, `"supportpin":"483920"`)
+
+	// a caller-supplied token must not shadow the session's own
+	if code, _, _ = proxy("/api/proxy/user/" + testUID + "/dashboard?token=evil"); code != http.StatusOK {
+		t.Fatalf("caller-supplied token reached the API: %d", code)
+	}
+
+	// upstream status codes pass through instead of collapsing to 200
+	if code, _, _ = proxy("/api/proxy/nope/nothing"); code != http.StatusNotFound {
+		t.Fatalf("proxy swallowed the upstream 404: %d", code)
+	}
+
+	// traversal never reaches the API, encoded or not
+	if code, _, _ = proxy("/api/proxy/user/%2e%2e/secret"); code != http.StatusBadRequest {
+		t.Fatalf("proxy accepted traversal: %d", code)
+	}
+
+	// writes need the CSRF token, exactly like a form POST
+	resp, err = client.PostForm(panel.URL+"/api/proxy/user/"+testUID+"/affiliate",
+		url.Values{"name": {"partner"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readBody(t, resp)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("proxy POST without csrf: want 403, got %d", resp.StatusCode)
+	}
+	resp, err = client.PostForm(panel.URL+"/api/proxy/user/"+testUID+"/affiliate",
+		url.Values{"csrf": {sessCSRF}, "name": {"partner"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := readBody(t, resp); resp.StatusCode != http.StatusOK {
+		t.Fatalf("proxy POST with csrf: want 200, got %d (%s)", resp.StatusCode, b)
+	}
+
+	send := func(method, path string, body io.Reader, hdr map[string]string) (int, string) {
+		t.Helper()
+		req, err := http.NewRequest(method, panel.URL+path, body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp.StatusCode, readBody(t, resp)
+	}
+	aff := "/api/proxy/user/" + testUID + "/affiliate"
+	affLink := aff + "/7c1d2e3f-0a5b-4c6d-8e9f-1a2b3c4d5e6f"
+	tokenHdr := map[string]string{"X-CSRF-Token": sessCSRF}
+
+	// DELETE has no body to put a token in, so it carries the header instead,
+	// and must reach the API without a body attached
+	if code, b := send("DELETE", affLink, nil, tokenHdr); code != http.StatusOK {
+		t.Fatalf("proxy DELETE with header token: want 200, got %d (%s)", code, b)
+	}
+	if code, _ = send("DELETE", affLink, nil, nil); code != http.StatusForbidden {
+		t.Fatalf("proxy DELETE without token: want 403, got %d", code)
+	}
+
+	// a body the proxy cannot re-encode is refused, not forwarded field-less
+	if code, _ = send("POST", aff, strings.NewReader("--x--\r\n"), map[string]string{
+		"X-CSRF-Token": sessCSRF,
+		"Content-Type": "multipart/form-data; boundary=x",
+	}); code != http.StatusUnsupportedMediaType {
+		t.Fatalf("proxy accepted a body it cannot forward: %d", code)
+	}
+
+	// methods outside the allowlist never reach the API
+	if code, _ = send("PUT", aff, nil, tokenHdr); code != http.StatusMethodNotAllowed {
+		t.Fatalf("proxy PUT: want 405, got %d", code)
+	}
+
 	// POST without CSRF → rejected
 	resp, err = client.PostForm(panel.URL+"/logout", url.Values{})
 	if err != nil {
@@ -633,6 +780,33 @@ func TestLoginFlowAndSecurity(t *testing.T) {
 	readBody(t, resp)
 	if !strings.HasSuffix(resp.Request.URL.Path, "/login") {
 		t.Fatal("session survived logout")
+	}
+
+	// the proxy answers a fetch()-shaped 401 instead of redirecting to /login
+	if code, _, _ = proxy("/api/proxy/user/" + testUID + "/dashboard"); code != http.StatusUnauthorized {
+		t.Fatalf("proxy after logout: want 401, got %d", code)
+	}
+}
+
+// The login limiter is only worth anything if it counts the real client, so a
+// forwarded header must be believed behind our proxy and ignored anywhere else.
+func TestClientIP(t *testing.T) {
+	for _, c := range []struct{ remote, fwd, want string }{
+		{"127.0.0.1:5555", "203.0.113.9", "203.0.113.9"},          // nginx on the same host
+		{"127.0.0.1:5555", "1.2.3.4, 203.0.113.9", "203.0.113.9"}, // client-supplied prefix ignored
+		{"172.17.0.1:5555", "203.0.113.9", "203.0.113.9"},         // docker bridge
+		{"127.0.0.1:5555", "", "127.0.0.1"},
+		{"127.0.0.1:5555", "not-an-ip", "127.0.0.1"},
+		{"198.51.100.7:5555", "203.0.113.9", "198.51.100.7"}, // exposed directly: header is a lie
+	} {
+		r := httptest.NewRequest("POST", "/login", nil)
+		r.RemoteAddr = c.remote
+		if c.fwd != "" {
+			r.Header.Set("X-Forwarded-For", c.fwd)
+		}
+		if got := clientIP(r); got != c.want {
+			t.Errorf("clientIP(%s, xff=%q) = %q, want %q", c.remote, c.fwd, got, c.want)
+		}
 	}
 }
 

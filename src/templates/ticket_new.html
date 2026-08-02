@@ -1,8 +1,5 @@
 {{define "content"}}
-<div class="page-head">
-  <h1 class="page-title">Create New Ticket</h1>
-  <span class="page-sub">Support · 9:00 – 23:00</span>
-</div>
+{{template "pagehead" (list "Create New Ticket" "Support · 9:00 – 23:00")}}
 
 {{with .Data}}
 <div class="card" style="max-width:720px">

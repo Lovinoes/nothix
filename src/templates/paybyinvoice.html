@@ -1,8 +1,5 @@
 {{define "content"}}
-<div class="page-head">
-  <h1 class="page-title">Purchase by invoice</h1>
-  <span class="page-sub">Accounting · Credit limit · Unpaid positions</span>
-</div>
+{{template "pagehead" (list "Purchase by invoice" "Accounting · Credit limit · Unpaid positions")}}
 
 {{with .Data}}
 <section class="sec">
@@ -38,7 +35,7 @@
         <td>{{.Display}}{{if .AdditionalData}}<br><span class="mono-sm">{{.AdditionalData}}</span>{{end}}</td>
         <td>
           {{.InvoiceDisplayName}}
-          <button class="btn pbi-reassign" type="button" data-invoice="{{.Invoice}}" data-transaction="{{.ID}}" style="margin-left:8px">reassign</button>
+          <button class="btn" type="button" data-dlg="pbi-reassign-modal" data-invoice="{{.Invoice}}" data-transaction="{{.ID}}" style="margin-left:8px">reassign</button>
         </td>
         <td>{{fmtUnixTime .CreatedOn}}</td>
       </tr>
@@ -63,8 +60,8 @@
         <td>{{printf "%.2f" .Total}} €</td>
         <td class="r">
           <div class="btn-row end">
-            {{if ne .ID "default"}}<button class="btn pbi-edit" type="button" data-id="{{.ID}}" data-name="{{.Name}}">edit</button>{{end}}
-            <button class="btn btn-primary pbi-pay" type="button" data-id="{{.ID}}">pay</button>
+            {{if ne .ID "default"}}<button class="btn" type="button" data-dlg="pbi-edit-modal" data-id="{{.ID}}" data-name="{{.Name}}">edit</button>{{end}}
+            <button class="btn btn-primary" type="button" data-dlg="pbi-pay-modal" data-id="{{.ID}}">pay</button>
           </div>
         </td>
       </tr>
@@ -75,26 +72,19 @@
 </section>
 
 <dialog id="pbi-create-modal" class="modal modal-sm">
-  <div class="modal-head">
-    <h2 class="modal-title">Create own invoice</h2>
-  </div>
+  {{template "modalhead" "Create own invoice"}}
   <form method="post" action="/paybyinvoice/create">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
     <div class="field">
       <label for="pbi-create-name">Name</label>
       <input type="text" id="pbi-create-name" name="name" maxlength="64" required>
     </div>
-    <div class="btn-row end">
-      <button class="btn" type="button" data-close>close</button>
-      <button class="btn btn-primary" type="submit">create</button>
-    </div>
+    {{template "modalfoot" "create"}}
   </form>
 </dialog>
 
 <dialog id="pbi-edit-modal" class="modal modal-sm">
-  <div class="modal-head">
-    <h2 class="modal-title">Edit own invoice</h2>
-  </div>
+  {{template "modalhead" "Edit own invoice"}}
   <form method="post" action="/paybyinvoice/rename">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
     <input type="hidden" name="id">
@@ -102,17 +92,12 @@
       <label for="pbi-edit-name">Name</label>
       <input type="text" id="pbi-edit-name" name="name" maxlength="64" required>
     </div>
-    <div class="btn-row end">
-      <button class="btn" type="button" data-close>close</button>
-      <button class="btn btn-primary" type="submit">save</button>
-    </div>
+    {{template "modalfoot" "save"}}
   </form>
 </dialog>
 
 <dialog id="pbi-reassign-modal" class="modal modal-sm">
-  <div class="modal-head">
-    <h2 class="modal-title">Reassign transaction</h2>
-  </div>
+  {{template "modalhead" "Reassign transaction"}}
   <form method="post" action="/paybyinvoice/reassign">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
     <input type="hidden" name="transaction">
@@ -124,17 +109,12 @@
         {{end}}
       </select>
     </div>
-    <div class="btn-row end">
-      <button class="btn" type="button" data-close>close</button>
-      <button class="btn btn-primary" type="submit">save</button>
-    </div>
+    {{template "modalfoot" "save"}}
   </form>
 </dialog>
 
 <dialog id="pbi-pay-modal" class="modal modal-sm">
-  <div class="modal-head">
-    <h2 class="modal-title">Pay invoice</h2>
-  </div>
+  {{template "modalhead" "Pay invoice"}}
   <form method="post" action="/paybyinvoice/pay">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
     <input type="hidden" name="id">
@@ -147,10 +127,7 @@
         <option value="credit">Pay with credit</option>
       </select>
     </div>
-    <div class="btn-row end">
-      <button class="btn" type="button" data-close>close</button>
-      <button class="btn btn-primary" type="submit">pay</button>
-    </div>
+    {{template "modalfoot" "pay"}}
   </form>
 </dialog>
 {{end}}

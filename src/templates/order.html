@@ -1,8 +1,5 @@
 {{define "content"}}
-<div class="page-head">
-  <h1 class="page-title">Order</h1>
-  <span class="page-sub">Available packages</span>
-</div>
+{{template "pagehead" (list "Order" "Available packages")}}
 
 {{with .Data}}
 <section class="sec">

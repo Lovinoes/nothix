@@ -133,7 +133,9 @@ if (payDlg) {
     payDlg.showModal();
   };
 
-  bindDialog('.pay-card', 'pay-modal', payOpen);
+  document.querySelectorAll('.pay-card').forEach(function (c) {
+    c.addEventListener('click', function () { payOpen(c); });
+  });
 
   payAmount.addEventListener('input', payRefresh);
   if (payCountry) payCountry.addEventListener('change', payRefresh);
@@ -147,8 +149,8 @@ if (payDlg) {
 }
 
 /* Modals: every .modal dialog gets close buttons + backdrop-click once;
-   [data-dlg] buttons open the dialog named in the attribute. bindDialog
-   additionally presets form fields per opener via fill(). */
+   [data-dlg] buttons open the dialog named in the attribute and prefill
+   its fields from their own data-* attributes. */
 document.querySelectorAll('dialog.modal').forEach(function (dlg) {
   dlg.querySelectorAll('[data-close]').forEach(function (c) {
     c.addEventListener('click', function () { dlg.close(); });
@@ -164,30 +166,14 @@ document.querySelectorAll('[data-dlg]').forEach(function (b) {
       if (l) l.href = ext;
     }
     var d = document.getElementById(b.getAttribute('data-dlg'));
-    if (d) d.showModal();
-  });
-});
-function bindDialog(btnSel, dlgId, fill) {
-  var dlg = document.getElementById(dlgId);
-  if (!dlg) return;
-  document.querySelectorAll(btnSel).forEach(function (b) {
-    b.addEventListener('click', function () {
-      if (fill) fill(b, dlg);
-      dlg.showModal();
+    if (!d) return;
+    Object.keys(b.dataset).forEach(function (k) {
+      if (k === 'dlg' || k === 'ext') return;
+      var f = d.querySelector('[name=' + k + ']');
+      if (f) f.value = b.dataset[k];
     });
+    d.showModal();
   });
-}
-
-bindDialog('.pbi-edit', 'pbi-edit-modal', function (b, dlg) {
-  dlg.querySelector('[name=id]').value = b.getAttribute('data-id');
-  dlg.querySelector('[name=name]').value = b.getAttribute('data-name');
-});
-bindDialog('.pbi-pay', 'pbi-pay-modal', function (b, dlg) {
-  dlg.querySelector('[name=id]').value = b.getAttribute('data-id');
-});
-bindDialog('.pbi-reassign', 'pbi-reassign-modal', function (b, dlg) {
-  dlg.querySelector('[name=transaction]').value = b.getAttribute('data-transaction');
-  dlg.querySelector('[name=invoice]').value = b.getAttribute('data-invoice');
 });
 
 /* Live tab: tiny canvas line charts fed by the same 60 s polling */

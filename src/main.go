@@ -6,6 +6,7 @@ package main
 // token; templates auto-escape; the binary executes nothing and writes no files.
 
 import (
+	"cmp"
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
@@ -38,6 +39,33 @@ type session struct {
 	username string
 	csrf     string
 	expires  time.Time
+	flashMsg string
+	flashErr string
+}
+
+// Flash text rides on the session, never in the URL. As a query parameter it
+// could be handed to a victim as a link and would render inside the panel's own
+// alert box, right above the field that collects their API key.
+func setFlash(r *http.Request, msg, errMsg string) {
+	s := getSession(r)
+	if s == nil {
+		return
+	}
+	sessMu.Lock()
+	s.flashMsg, s.flashErr = msg, errMsg
+	sessMu.Unlock()
+}
+
+func takeFlash(r *http.Request) (msg, errMsg string) {
+	s := getSession(r)
+	if s == nil {
+		return
+	}
+	sessMu.Lock()
+	msg, errMsg = s.flashMsg, s.flashErr
+	s.flashMsg, s.flashErr = "", ""
+	sessMu.Unlock()
+	return
 }
 
 var (
@@ -110,12 +138,32 @@ var (
 	loginHits = map[string][]time.Time{}
 )
 
-// allowLogin permits 5 attempts per 5 minutes per client IP.
-func allowLogin(remoteAddr string) bool {
-	ip, _, err := net.SplitHostPort(remoteAddr)
+// clientIP is the address the login limiter counts against. X-Forwarded-For is
+// only believed when the peer is loopback or on a private network, i.e. our own
+// reverse proxy: a directly exposed panel must never trust a header the client
+// writes itself. The last entry is the one our proxy appended, everything to the
+// left of it came from the client and is worthless.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		ip = remoteAddr
+		host = r.RemoteAddr
 	}
+	peer := net.ParseIP(host)
+	if peer == nil || !(peer.IsLoopback() || peer.IsPrivate()) {
+		return host
+	}
+	fwd := r.Header.Get("X-Forwarded-For")
+	if i := strings.LastIndex(fwd, ","); i >= 0 {
+		fwd = fwd[i+1:]
+	}
+	if ip := net.ParseIP(strings.TrimSpace(fwd)); ip != nil {
+		return ip.String()
+	}
+	return host
+}
+
+// allowLogin permits 5 attempts per 5 minutes per client IP.
+func allowLogin(ip string) bool {
 	now := time.Now()
 	loginMu.Lock()
 	defer loginMu.Unlock()
@@ -125,8 +173,13 @@ func allowLogin(remoteAddr string) bool {
 		return false
 	}
 	loginHits[ip] = append(keep, now)
-	if len(loginHits) > 10000 { // ponytail: crude flush guards memory; per-entry GC if it ever matters
-		loginHits = map[string][]time.Time{}
+	if len(loginHits) > 10000 {
+		// drop only windows that have expired. Flushing the whole map would let
+		// anyone who can reach /login reset everybody else's budget.
+		// ponytail: still unbounded against 10k live attackers, shard if it matters
+		maps.DeleteFunc(loginHits, func(_ string, hits []time.Time) bool {
+			return len(hits) == 0 || now.Sub(hits[len(hits)-1]) >= 5*time.Minute
+		})
 	}
 	return true
 }
@@ -208,15 +261,6 @@ var tmplFuncs = template.FuncMap{
 			return "warn"
 		}
 		return ""
-	},
-	"pctCap": func(v float64) string {
-		if v < 0 {
-			v = 0
-		}
-		if v > 100 {
-			v = 100
-		}
-		return fmt.Sprintf("%.1f", v)
 	},
 	"list": func(items ...string) []string { return items },
 }
@@ -301,7 +345,11 @@ func postGuard(w http.ResponseWriter, r *http.Request, wantCSRF string) bool {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return false
 	}
-	got := r.PostFormValue("csrf")
+	// the header is for fetch() callers: ParseForm only reads bodies on
+	// POST/PUT/PATCH, so a DELETE has nowhere else to carry the token. It is no
+	// weaker than the form field, a custom header needs a CORS preflight that
+	// this panel never answers.
+	got := cmp.Or(r.Header.Get("X-CSRF-Token"), r.PostFormValue("csrf"))
 	if got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(wantCSRF)) != 1 {
 		http.Error(w, "invalid csrf token", http.StatusForbidden)
 		return false
@@ -334,15 +382,19 @@ func originOK(r *http.Request) bool {
 // (revoked key, expired token) drop the panel session entirely.
 func apiFail(w http.ResponseWriter, r *http.Request, target string, err error) {
 	if isAuthError(err) {
+		// the session is gone, so this one code travels in the URL. loginPage
+		// maps it back to fixed text instead of echoing whatever it is given.
 		dropSession(w, r)
-		http.Redirect(w, r, "/login?err="+url.QueryEscape("Your API key was rejected — please sign in again."), http.StatusSeeOther)
+		http.Redirect(w, r, "/login?err=rejected", http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, target+flashSep(target)+"err="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+	setFlash(r, "", err.Error())
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func flashOK(w http.ResponseWriter, r *http.Request, target, msg string) {
-	http.Redirect(w, r, target+flashSep(target)+"msg="+url.QueryEscape(msg), http.StatusSeeOther)
+	setFlash(r, msg, "")
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func flashSep(target string) string {
@@ -390,10 +442,10 @@ func newMux() http.Handler {
 	mux.HandleFunc("GET /invoice/{id}", requireAuth(invoiceView))
 	mux.HandleFunc("GET /donations", requireAuth(donationsPage))
 	mux.HandleFunc("POST /donations/create", requireAuth(donationLinkCreate))
-	mux.HandleFunc("POST /donations/delete", requireAuth(donationLinkDelete))
+	mux.HandleFunc("POST /donations/delete", requireAuth(idDelete("/credit/donation/link/", "/donations", "Donation link deleted.")))
 	mux.HandleFunc("GET /affiliate", requireAuth(affiliatePage))
 	mux.HandleFunc("POST /affiliate/create", requireAuth(affiliateLinkCreate))
-	mux.HandleFunc("POST /affiliate/delete", requireAuth(affiliateLinkDelete))
+	mux.HandleFunc("POST /affiliate/delete", requireAuth(idDelete("/affiliate/", "/affiliate", "Affiliate link deleted.")))
 	mux.HandleFunc("GET /credit", requireAuth(creditPage))
 	mux.HandleFunc("POST /credit/topup", requireAuth(creditTopup))
 	mux.HandleFunc("POST /credit/invoicedata", requireAuth(creditInvoiceData))
@@ -464,7 +516,7 @@ func newMux() http.Handler {
 	// account / support / settings actions
 	mux.HandleFunc("POST /account/password", requireAuth(accountPassword))
 	mux.HandleFunc("POST /account/sshkey", requireAuth(accountSSHKeyAdd))
-	mux.HandleFunc("POST /account/sshkey/delete", requireAuth(accountSSHKeyDelete))
+	mux.HandleFunc("POST /account/sshkey/delete", requireAuth(idDelete("/sshkeys/", "/settings?tab=sshkeys", "SSH key deleted.")))
 	mux.HandleFunc("POST /account/redeem", requireAuth(accountRedeem))
 	mux.HandleFunc("POST /account/verifyemail", requireAuth(accountVerifyEmail))
 	mux.HandleFunc("POST /support/pin", requireAuth(supportNewPin))
@@ -474,12 +526,15 @@ func newMux() http.Handler {
 	mux.HandleFunc("POST /settings/twofa/init", requireAuth(settingsTwofaInit))
 	mux.HandleFunc("POST /settings/twofa/finish", requireAuth(settingsTwofaFinish))
 	mux.HandleFunc("POST /settings/twofa/remove", requireAuth(settingsTwofaRemove))
-	mux.HandleFunc("POST /settings/session/delete", requireAuth(settingsSessionDelete))
+	mux.HandleFunc("POST /settings/session/delete", requireAuth(idDelete("/sessions/", "/settings?tab=sessions", "Session deleted.")))
 	mux.HandleFunc("POST /settings/sessions/deleteall", requireAuth(settingsSessionsDeleteAll))
 
 	// polled JSON
 	mux.HandleFunc("GET /api/server/{id}/status", requireAuth(apiStatus))
 	mux.HandleFunc("GET /api/server/{id}/live", requireAuth(apiLive))
+
+	// generic passthrough to the Datalix API (own session + CSRF handling)
+	mux.HandleFunc("/api/proxy/{path...}", proxyAPI)
 
 	return secureHeaders(mux)
 }

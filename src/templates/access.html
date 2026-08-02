@@ -1,8 +1,5 @@
 {{define "content"}}
-<div class="page-head">
-  <h1 class="page-title">Access</h1>
-  <span class="page-sub">Share service management with other Datalix accounts</span>
-</div>
+{{template "pagehead" (list "Access" "Share service management with other Datalix accounts")}}
 
 {{with .Data}}
 <section class="sec">
@@ -35,8 +32,7 @@
             {{if .Perms}}<button class="btn" type="button" data-dlg="access-edit-{{.ID}}">edit</button>{{end}}
             <form method="post" action="/access/delete" data-confirm="Delete this access? The invited user loses access to the service.">
               <input type="hidden" name="csrf" value="{{$.CSRF}}">
-              <input type="hidden" name="id" value="{{.ID}}">
-              <button class="btn btn-danger" type="submit">delete</button>
+              <button class="btn btn-danger" type="submit" name="id" value="{{.ID}}">delete</button>
             </form>
           </div>
         </td>
@@ -65,13 +61,11 @@
           <div class="btn-row end">
             <form method="post" action="/access/accept">
               <input type="hidden" name="csrf" value="{{$.CSRF}}">
-              <input type="hidden" name="id" value="{{.ID}}">
-              <button class="btn btn-primary" type="submit">accept</button>
+              <button class="btn btn-primary" type="submit" name="id" value="{{.ID}}">accept</button>
             </form>
             <form method="post" action="/access/deny" data-confirm="Deny this access request?">
               <input type="hidden" name="csrf" value="{{$.CSRF}}">
-              <input type="hidden" name="id" value="{{.ID}}">
-              <button class="btn btn-danger" type="submit">deny</button>
+              <button class="btn btn-danger" type="submit" name="id" value="{{.ID}}">deny</button>
             </form>
           </div>
         </td>
@@ -85,9 +79,7 @@
 
 {{if .Services}}
 <dialog id="access-create-modal" class="modal">
-  <div class="modal-head">
-    <h2 class="modal-title">Create access</h2>
-  </div>
+  {{template "modalhead" "Create access"}}
   <form method="post" action="/access/create">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
     <div class="field">
@@ -111,17 +103,7 @@
     {{range .Groups}}
     <fieldset class="perm-set" data-pid="{{.PID}}" hidden disabled>
       <legend class="sec-label" style="margin-bottom:8px">Permissions</legend>
-      <div class="perm-grid">
-        {{range .Perms}}
-        {{$p := .}}
-        <div>
-          <label class="check"><input type="checkbox" name="perm" value="{{.Name}}"> {{.Header}}</label>
-          {{range .Sub}}
-          <label class="check perm-sub"><input type="checkbox" name="perm" value="{{.Name}}" data-parent="{{$p.Name}}"> {{.Header}}</label>
-          {{end}}
-        </div>
-        {{end}}
-      </div>
+      {{template "permgrid" .}}
     </fieldset>
     {{end}}
     <div class="btn-row end" style="margin-top:12px">
@@ -135,34 +117,20 @@
 {{range .Granted}}
 {{if .Perms}}
 <dialog id="access-edit-{{.ID}}" class="modal">
-  <div class="modal-head">
-    <h2 class="modal-title">Edit access</h2>
-  </div>
+  {{template "modalhead" "Edit access"}}
   <form method="post" action="/access/edit">
     <input type="hidden" name="csrf" value="{{$.CSRF}}">
-    <input type="hidden" name="id" value="{{.ID}}">
     <div class="field">
       <label for="access-edit-name-{{.ID}}">Display name</label>
       <input type="text" id="access-edit-name-{{.ID}}" name="name" maxlength="64" value="{{.Name}}">
     </div>
-    {{$has := .Has}}
     <fieldset class="perm-set">
       <legend class="sec-label" style="margin-bottom:8px">Permissions</legend>
-      <div class="perm-grid">
-        {{range .Perms}}
-        {{$p := .}}
-        <div>
-          <label class="check"><input type="checkbox" name="perm" value="{{.Name}}" {{if index $has .Name}}checked{{end}}> {{.Header}}</label>
-          {{range .Sub}}
-          <label class="check perm-sub"><input type="checkbox" name="perm" value="{{.Name}}" data-parent="{{$p.Name}}" {{if index $has .Name}}checked{{end}}> {{.Header}}</label>
-          {{end}}
-        </div>
-        {{end}}
-      </div>
+      {{template "permgrid" .}}
     </fieldset>
     <div class="btn-row end" style="margin-top:12px">
       <button class="btn" type="button" data-close>close</button>
-      <button class="btn btn-primary" type="submit">save</button>
+      <button class="btn btn-primary" type="submit" name="id" value="{{.ID}}">save</button>
     </div>
   </form>
 </dialog>

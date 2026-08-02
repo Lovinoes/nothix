@@ -1,8 +1,5 @@
 {{define "content"}}
-<div class="page-head">
-  <h1 class="page-title">Orders</h1>
-  <span class="page-sub">Accounting · Check the status of your orders</span>
-</div>
+{{template "pagehead" (list "Orders" "Accounting · Check the status of your orders")}}
 
 {{with .Data}}
 <div class="card tbl-scroll">

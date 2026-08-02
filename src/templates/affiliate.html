@@ -1,8 +1,5 @@
 {{define "content"}}
-<div class="page-head">
-  <h1 class="page-title">Affiliate links</h1>
-  <span class="page-sub">Accounting · Manage your affiliate links · Payouts</span>
-</div>
+{{template "pagehead" (list "Affiliate links" "Accounting · Manage your affiliate links · Payouts")}}
 
 {{with .Data}}
 <section class="sec">
@@ -55,8 +52,7 @@
         <td class="r">
           <form method="post" action="/affiliate/delete" data-confirm="Delete affiliate link {{.Name}}?">
             <input type="hidden" name="csrf" value="{{$.CSRF}}">
-            <input type="hidden" name="id" value="{{.ID}}">
-            <button class="btn btn-danger" type="submit">delete</button>
+            <button class="btn btn-danger" type="submit" name="id" value="{{.ID}}">delete</button>
           </form>
         </td>
       </tr>
