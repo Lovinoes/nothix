@@ -1,15 +1,16 @@
 # nothix
 
 A third-party customer panel for [Datalix](https://datalix.eu) with a
-Nothing-OS-inspired look. One Go binary, zero dependencies, talks straight to the
+Nothing inspired look. One Go binary, zero dependencies, talks straight to the
 official [Datalix API](https://apidoc.datalix.de/).
 
 Live at **[nothix.lovinoes.de](https://nothix.lovinoes.de/login)**.
 
 > [!NOTE]
 > A small project I built for fun, so **use at your own risk**. It does aim to be
-> secure by default, see [security](docs/security.md). On the internet, put it
-> behind nginx with SSL only, see [deploying](docs/deploying.md).
+> secure by default, see [security](docs/security.md).
+>
+> On the internet, put it behind nginx with SSL only, see [deploying](docs/deploying.md).
 >
 > Vibecoded under human supervision by **Opus & Claude Fable 5** running ultracode (ultra steroids).
 
@@ -52,8 +53,8 @@ Either way, log in with a Datalix API key (official panel → Other → API key)
 - [security.md](docs/security.md), what the panel does with your API key
 - [development.md](docs/development.md), layout, tests and the demo server
 
-## License
-
-MIT, see [LICENSE](LICENSE). © 2026 Lovinoes. Nothing (Ndot57 / NType82) typefaces
-bundled from [xeji01/nothingfont](https://github.com/xeji01/nothingfont) via
-[ndot-logo-generator](https://github.com/Lovinoes/ndot-logo-generator).
+## Credits
+- [Datalix GmbH](https://datalix.eu/) - https://datalix.eu/
+- [NOTHING](https://nothing.tech) Tech. All Rights Reserved.
+- [xeji01/nothingfont](https://github.com/xeji01/nothingfont) - https://github.com/xeji01/nothingfont
+- [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail) - https://github.com/DietrichGebert/ponytail
